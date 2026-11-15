@@ -12,14 +12,12 @@ import '@xyflow/react/dist/style.css';
 import type { HypothesisMap } from '../types';
 import { ARROW_STYLE, computeLayout } from '../model/layout';
 import { CardView, type StickyNodeData } from './CardView';
-import { MetricEdge } from './MetricEdge';
 
 interface Props {
   map: HypothesisMap;
 }
 
 const nodeTypes = { sticky: CardView };
-const edgeTypes = { metric: MetricEdge };
 
 /** Доска на React Flow: карточки-узлы, стрелки с цельными наконечниками,
  * точечный фон, зум и панорамирование из коробки. Без анимаций. */
@@ -42,17 +40,13 @@ export function MapView({ map }: Props) {
       const color = e.kind === 'block' ? '#cc7c7c' : ARROW_STYLE[key]!.color;
       const width = ARROW_STYLE[key]!.width;
       const markerSize = Math.round(8 + width * 3);
-      // дуги гипотеза→цель — кастомный ортогональный маршрут с входом
-      // строго в правую грань цели
-      const metric = e.kind === 'metric';
       return {
         id: `e-${i}`,
         source: e.from,
         target: e.to,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
-        type: metric ? 'metric' : 'default',
-        ...(metric ? { data: { lowY: e.lowY } } : {}),
+        type: 'default',
         style: { stroke: color, strokeWidth: width },
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -71,7 +65,6 @@ export function MapView({ map }: Props) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
         minZoom={0.05}
@@ -91,6 +84,7 @@ export function MapView({ map }: Props) {
         <span className="chip"><i style={{ background: ARROW_STYLE.low.color }} />3 — низкое</span>
         <span className="chip">цифры на карточке: влияние (верх) и затраты (низ)</span>
         <span className="chip">толще стрелка — сильнее влияние</span>
+        <span className="chip">красная тонкая к задаче — блокер</span>
       </div>
     </div>
   );

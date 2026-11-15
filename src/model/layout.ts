@@ -7,7 +7,7 @@ import type { HypothesisMap, Level } from '../types';
  */
 
 export type CardKind = 'goal' | 'subject' | 'hypothesis' | 'task' | 'blocker';
-export type EdgeKind = 'flow' | 'metric' | 'block';
+export type EdgeKind = 'flow' | 'block';
 
 /** Строка карточки: жирная связка/заголовок + обычный текст. */
 export interface CardRow {
@@ -39,8 +39,6 @@ export interface EdgeNode {
   level: Level | null;
   sourceHandle: string;
   targetHandle: string;
-  /** Для дуг гипотеза→цель: ортогональный обход ниже этой отметки. */
-  lowY?: number;
 }
 export interface Layout {
   cards: CardNode[];
@@ -250,7 +248,9 @@ export function computeLayout(map: HypothesisMap): Layout {
     x += COLUMN_W[column] + (column === 'task' ? BLOCKER_GAP : COL_GAP);
   }
 
-  // --- связи: точки входа распределяем по правому краю карточки-цели ---
+  // --- связи: каноническая топология «задача → гипотеза → субъект → цель» ---
+  // Влияние гипотез на метрики живёт в данных, но не рисуется: гипотеза
+  // воздействует на субъекта, субъект — на цель.
   interface RawEdge {
     from: string;
     to: string;
@@ -259,11 +259,12 @@ export function computeLayout(map: HypothesisMap): Layout {
   }
   const rawEdges: RawEdge[] = [
     ...map.tasks.map((t) => ({ from: t.id, to: t.hypothesis, kind: 'flow' as const, level: null })),
-    ...map.hypotheses.flatMap((h) => [
-      { from: h.id, to: h.subject, kind: 'flow' as const, level: h.influence },
-      // влияние на метрики → дуга к цели с обходом колонки субъектов снизу
-      { from: h.id, to: map.goal.id, kind: 'metric' as const, level: h.influence },
-    ]),
+    ...map.hypotheses.map((h) => ({
+      from: h.id,
+      to: h.subject,
+      kind: 'flow' as const,
+      level: h.influence,
+    })),
     ...map.subjects.map((s) => ({
       from: s.id,
       to: map.goal.id,
@@ -274,14 +275,7 @@ export function computeLayout(map: HypothesisMap): Layout {
   ];
 
   // Все стрелки входят в правую грань карточки-цели; точки распределяем
-  // по высоте грани. Дуги гипотеза→цель обходят колонку субъектов снизу:
-  // размеры узлов фиксированы раскладкой, поэтому низ субъектов известен точно.
-  const subjectsBottom = Math.max(
-    ...[...cards.values()]
-      .filter((c) => c.kind === 'subject')
-      .map((c) => positions.get(c.id)!.y + c.height),
-  );
-  const lowY = subjectsBottom + 70;
+  // по высоте грани.
 
   const incomingIdx = new Map<string, number>();
   const edges: EdgeNode[] = rawEdges.map((e) => {
@@ -295,7 +289,6 @@ export function computeLayout(map: HypothesisMap): Layout {
       level: e.level,
       sourceHandle: 's-left',
       targetHandle: `t-${idx}`,
-      ...(e.kind === 'metric' && lowY !== undefined ? { lowY } : {}),
     };
   });
 
