@@ -1,17 +1,21 @@
 import type { HypothesisMap, Level } from '../types';
 
 /**
- * Детерминированная колоночная раскладка (порт python-черновика renderer_cards.py):
- * координаты карточек вычисляются из модели, поэтому SVG-стрелки проводятся
- * точно от карточки к карточке. Высота карточки — оценка по переносам строк.
+ * Колоночная раскладка по эталонному виду карты гипотез (шаблон Miro из базы
+ * знаний методологии): крупные «стикерные» карточки — цель-квадрат с метриками
+ * внутри, субъекты, вертикальные гипотезы с цифрами влияния и затрат на углу,
+ * задачи-полосы. Текст крупный, связки «Если/то/потому что/тогда» — жирным.
  */
 
-export type CardKind = 'goal' | 'metric' | 'subject' | 'hypothesis' | 'task' | 'blocker';
+export type CardKind = 'goal' | 'subject' | 'hypothesis' | 'task' | 'blocker';
 export type EdgeKind = 'flow' | 'metric' | 'balance' | 'block';
 
+/** Строка карточки: жирная связка/заголовок + обычный текст. */
 export interface CardRow {
+  label?: string;
   text: string;
-  cls: string;
+  boldText?: boolean;
+  cls?: string;
 }
 export interface CardBadge {
   text: string;
@@ -25,9 +29,12 @@ export interface CardNode {
   w: number;
   h: number;
   rows: CardRow[];
-  badges: CardBadge[];
-  emoji: string;
-  typeLabel: string;
+  /** Цифра влияния (1–3) в квадратике на левом верхнем углу. */
+  priority: number | null;
+  /** Цифра затрат (1–3) — второй квадратик рядом. */
+  cost: number | null;
+  /** Статус гипотезы — маленький бейдж в правом верхнем углу. */
+  statusBadge: CardBadge | null;
   extraStyle?: string;
 }
 export interface EdgeNode {
@@ -36,6 +43,8 @@ export interface EdgeNode {
   kind: EdgeKind;
   level: Level | null;
   path: string;
+  /** Точка крепления стрелки к карточке-источнику (порт). */
+  start: { x: number; y: number };
 }
 export interface Layout {
   cards: CardNode[];
@@ -44,50 +53,52 @@ export interface Layout {
   height: number;
 }
 
-// --- Геометрия и типографика ---
-const CHAR_W = 7.3;
-const LINE_H = 19;
-const PAD = 13;
-const GAP_Y = 20;
-const COL_GAP = 96;
-const PAGE_PAD = 28;
+// --- Геометрия и типографика (масштаб «стикера» из эталона) ---
+const CHAR_W = 10.4; // средняя ширина символа кириллицы при 19px
+const LINE_H = 28; // 19px × 1.5
+const PAD = 24;
+const TASK_PAD = 18;
+const GAP_Y = 26;
+const COL_GAP = 120;
+const PAGE_PAD = 40;
 
 const COLUMN_ORDER: CardKind[] = ['goal', 'subject', 'hypothesis', 'task', 'blocker'];
 const COLUMN_W: Record<CardKind, number> = {
-  goal: 258,
-  metric: 258, // метрики живут в колонке цели
-  subject: 274,
-  hypothesis: 330,
-  task: 274,
-  blocker: 252,
+  goal: 400,
+  subject: 350,
+  hypothesis: 350,
+  task: 390,
+  blocker: 300,
 };
+/** Минимальная высота: цель — квадрат, задачи — полосы. */
+const MIN_H: Partial<Record<CardKind, number>> = { goal: 400, task: 96 };
 
+/** Палитра карточек — по эталонному шаблону (зелёный/янтарный/соломенный/васильковый). */
 export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = {
-  goal: { fill: '#c8e6c9', border: '#4e8b4c' },
-  metric: { fill: '#bbdefb', border: '#42719f' },
-  subject: { fill: '#ffe0b2', border: '#bb7b24' },
-  hypothesis: { fill: '#fff59d', border: '#b99b23' },
-  task: { fill: '#d6e4f7', border: '#58789f' },
-  blocker: { fill: '#ffcdd2', border: '#ad4141' },
+  goal: { fill: '#b5cc68', border: '#93ab4a' },
+  subject: { fill: '#f2b33d', border: '#cc9022' },
+  hypothesis: { fill: '#f7e36b', border: '#d1bd42' },
+  task: { fill: '#a9c7f0', border: '#84a5d6' },
+  blocker: { fill: '#f2a6a6', border: '#cc7c7c' },
 };
 
-const EMOJI: Record<CardKind, string> = {
-  goal: '🎯',
-  metric: '📊',
-  subject: '👤',
-  hypothesis: '🧪',
-  task: '✅',
-  blocker: '🚧',
+/** Цифры на карточках: 1 — красный (высокий), 2 — оранжевый, 3 — зелёный (низкий). */
+export const PRIORITY_COLORS: Record<number, string> = {
+  1: '#e05a5a',
+  2: '#e8a33d',
+  3: '#7cb342',
 };
-const TYPE_RU: Record<CardKind, string> = {
-  goal: 'ЦЕЛЬ',
-  metric: 'МЕТРИКА',
-  subject: 'СУБЪЕКТ',
-  hypothesis: 'ГИПОТЕЗА',
-  task: 'ЗАДАЧА',
-  blocker: 'БЛОКЕР',
+
+export const LEVEL_TO_PRIORITY: Record<Level, number> = { high: 1, medium: 2, low: 3 };
+
+/** Цвет и толщина стрелки по силе влияния. */
+export const ARROW_STYLE: Record<string, { color: string; width: number }> = {
+  high: { color: '#e05a5a', width: 3.5 },
+  medium: { color: '#e8a33d', width: 2.6 },
+  low: { color: '#7cb342', width: 2 },
+  none: { color: '#8a8f98', width: 1.8 },
 };
-const LEVEL_RU: Record<Level, string> = { low: 'низк.', medium: 'средн.', high: 'высок.' };
+
 const STATUS_RU: Record<string, string> = {
   draft: 'черновик',
   'to-verify': 'к проверке',
@@ -101,131 +112,126 @@ const STATUS_CLS: Record<string, string> = {
   refuted: 'st-fail',
 };
 
-/** Цвет и толщина стрелки по силе влияния. */
-export const ARROW_STYLE: Record<string, { color: string; width: number }> = {
-  high: { color: '#c94a3d', width: 3.2 },
-  medium: { color: '#d98a1f', width: 2.4 },
-  low: { color: '#6f9a3d', width: 1.9 },
-  none: { color: '#8a8f98', width: 1.6 },
-};
-
-function wrap(text: string, maxChars: number): string[] {
-  const out: string[] = [];
-  for (const raw of String(text).split('\n')) {
-    let cur = '';
-    for (const word of raw.split(' ')) {
-      const cand = cur === '' ? word : `${cur} ${word}`;
-      if (cur !== '' && cand.length > maxChars) {
-        out.push(cur);
-        cur = word;
-      } else {
-        cur = cand;
-      }
-    }
-    out.push(cur);
-  }
-  return out;
-}
-
 class Card {
-  readonly lines: string[] = [];
+  readonly rows: CardRow[] = [];
+  private lineCount = 0;
+  priority: number | null = null;
+  cost: number | null = null;
+  statusBadge: CardBadge | null = null;
   extraStyle?: string;
+
   constructor(
     readonly id: string,
     readonly kind: CardKind,
-    readonly badges: CardBadge[] = [],
   ) {}
+
   get w(): number {
-    return COLUMN_W[this.column];
+    return COLUMN_W[this.kind];
   }
-  get column(): CardKind {
-    // метрики живут в колонке цели
-    return this.kind === 'metric' ? 'goal' : this.kind;
-  }
-  add(text: string, cls = ''): void {
-    const maxChars = Math.floor((this.w - 2 * PAD) / CHAR_W);
-    const wrapped = wrap(text, maxChars);
-    for (const line of wrapped) this.lines.push(cls ? `${cls}\u0000${line}` : `\u0000${line}`);
+  get pad(): number {
+    return this.kind === 'task' ? TASK_PAD : PAD;
   }
   get height(): number {
-    return (
-      2 * PAD + 24 + (this.badges.length ? 18 : 0) + this.lines.length * LINE_H + 4
-    );
+    const h = 2 * this.pad + this.lineCount * LINE_H + (this.rows.length - 1) * 4;
+    return Math.max(MIN_H[this.kind] ?? 0, h);
+  }
+
+  /** Строка с жирной связкой (label) и обычным текстом. */
+  add(label: string, text: string, opts: { boldText?: boolean; cls?: string } = {}): void {
+    this.rows.push({ label: label || undefined, text, ...opts });
+    const full = `${label} ${text}`.trim();
+    this.lineCount += wrapCount(full, Math.floor((this.w - 2 * this.pad) / CHAR_W));
   }
 }
 
-/** Каждая строка закодирована как «css-класс\0текст». */
-function decodeLines(card: Card): CardRow[] {
-  return card.lines.map((line) => {
-    const [cls, ...rest] = line.split('\u0000');
-    return { cls: cls ?? '', text: rest.join('\u0000') };
-  });
+function wrapCount(text: string, maxChars: number): number {
+  let lines = 0;
+  let cur = 0;
+  for (const word of text.split(' ')) {
+    const add = cur === 0 ? word.length : word.length + 1;
+    if (cur > 0 && cur + add > maxChars) {
+      lines += 1;
+      cur = word.length;
+    } else {
+      cur += add;
+    }
+  }
+  return lines + (cur > 0 ? 1 : 0);
 }
 
 export function computeLayout(map: HypothesisMap): Layout {
   const cards = new Map<string, Card>();
 
+  // --- Цель: метрики внутри карточки, как в эталоне ---
   const goalCard = new Card(map.goal.id, 'goal');
-  goalCard.add(map.goal.description, 'strong');
-  if (map.meta.horizon) goalCard.add(`Горизонт: ${map.meta.horizon}`);
+  goalCard.add('', 'Цель', { boldText: true });
+  goalCard.add('', map.goal.description);
+  const main = map.goal.metrics.filter((m) => !m.balancing);
+  if (main.length > 0) {
+    goalCard.add('', 'Метрики', { boldText: true });
+    for (const m of main) goalCard.add('', `${m.description}: ${m.current} → ${m.target}`);
+  }
+  const balancing = map.goal.metrics.filter((m) => m.balancing);
+  if (balancing.length > 0) {
+    goalCard.add('', 'Балансирующие метрики', { boldText: true });
+    for (const m of balancing) goalCard.add('', `${m.description}: ${m.current} → ${m.target}`);
+  }
   cards.set(map.goal.id, goalCard);
 
-  for (const m of map.goal.metrics) {
-    const c = new Card(
-      m.id,
-      'metric',
-      m.balancing ? [{ text: 'балансирующая', cls: 'bg-bal' }] : [],
-    );
-    c.add(m.description, 'strong');
-    c.add(`${m.current} → цель ${m.target}`);
-    cards.set(m.id, c);
-  }
-
+  // --- Субъекты ---
   for (const s of map.subjects) {
-    const badges: CardBadge[] = [];
-    if (s.negative) badges.push({ text: 'негативный субъект', cls: 'bg-neg' });
-    badges.push({ text: `влияние: ${LEVEL_RU[s.influence] ?? '—'}`, cls: 'bg-plain' });
-    const c = new Card(s.id, 'subject', badges);
-    c.add(s.description, 'strong');
-    for (const p of s.pains ?? []) c.add(`Боль: ${p}`);
-    for (const wish of s.wishes ?? []) c.add(`Желание: ${wish}`);
+    const c = new Card(s.id, 'subject');
+    c.priority = LEVEL_TO_PRIORITY[s.influence] ?? null;
+    c.add('', s.description, { boldText: true });
+    if ((s.pains ?? []).length > 0) {
+      c.add('', 'Боли', { boldText: true });
+      for (const p of s.pains ?? []) c.add('', p);
+    }
+    if ((s.wishes ?? []).length > 0) {
+      c.add('', 'Желания', { boldText: true });
+      for (const wish of s.wishes ?? []) c.add('', wish);
+    }
+    if (s.negative) c.statusBadge = { text: 'негативный субъект', cls: 'bg-neg' };
     cards.set(s.id, c);
   }
 
+  // --- Гипотезы: две цифры (влияние, затраты), связки жирным ---
   for (const h of map.hypotheses) {
-    const badges: CardBadge[] = [
-      { text: STATUS_RU[h.status] ?? '?', cls: STATUS_CLS[h.status] ?? '' },
-      { text: `влияние: ${LEVEL_RU[h.influence] ?? '—'}`, cls: 'bg-plain' },
-      { text: `затраты: ${LEVEL_RU[h.cost] ?? '—'}`, cls: 'bg-plain' },
-    ];
-    const c = new Card(h.id, 'hypothesis', badges);
-    c.add(`Если: ${h.if}`, 'f-if');
-    c.add(`То: ${h.then}`, 'f-then');
-    c.add(`Потому что: ${h.because}`, 'f-because');
-    c.add(`Тогда: ${h.so}`, 'f-so');
+    const c = new Card(h.id, 'hypothesis');
+    c.priority = LEVEL_TO_PRIORITY[h.influence] ?? null;
+    c.cost = LEVEL_TO_PRIORITY[h.cost] ?? null;
+    c.statusBadge = { text: STATUS_RU[h.status] ?? '?', cls: STATUS_CLS[h.status] ?? '' };
+    c.add('Если', h.if);
+    c.add('то', h.then);
+    c.add('потому что', h.because);
+    c.add('тогда', h.so);
     c.extraStyle =
-      h.status === 'confirmed'
-        ? 'border-width:3px'
-        : h.status === 'refuted'
-          ? 'opacity:.55'
-          : h.status === 'draft'
-            ? 'border-style:dashed'
-            : undefined;
+      h.status === 'refuted'
+        ? 'opacity:.55'
+        : h.status === 'draft'
+          ? 'outline:2px dashed #8a8f98;outline-offset:-2px'
+          : undefined;
     cards.set(h.id, c);
   }
 
+  // --- Задачи-полосы ---
   for (const t of map.tasks) {
     const c = new Card(t.id, 'task');
-    c.add(`☐ ${t.description}`, 'strong');
-    c.add(`${t.owner ?? '—'} · до ${t.due ?? '—'}`, 'muted');
+    c.add('', t.description, { boldText: true });
+    if (t.owner || t.due) {
+      c.add('', `${t.owner ?? '—'}${t.due ? ` · до ${t.due}` : ''}`, { cls: 'muted' });
+    }
     cards.set(t.id, c);
   }
 
+  // --- Блокеры ---
   for (const b of map.blockers) {
     const c = new Card(b.id, 'blocker');
-    c.add(b.reason, 'strong');
-    if (b.action) c.add(`Действие: ${b.action}`);
-    c.add(`${b.owner ?? '—'} · до ${b.due ?? '—'}`, 'muted');
+    c.add('', b.reason, { boldText: true });
+    if (b.action) c.add('Действие:', b.action);
+    if (b.owner || b.due) {
+      c.add('', `${b.owner ?? '—'}${b.due ? ` · до ${b.due}` : ''}`, { cls: 'muted' });
+    }
     cards.set(b.id, c);
   }
 
@@ -236,7 +242,7 @@ export function computeLayout(map: HypothesisMap): Layout {
   for (const column of COLUMN_ORDER) {
     let y = PAGE_PAD;
     for (const [id, card] of cards) {
-      if (card.column !== column) continue;
+      if (card.kind !== column) continue;
       positions.set(id, { x, y });
       y += card.height + GAP_Y;
     }
@@ -255,91 +261,82 @@ export function computeLayout(map: HypothesisMap): Layout {
       y: pos.y,
       w: card.w,
       h: card.height,
-      rows: decodeLines(card),
-      badges: card.badges,
-      emoji: EMOJI[card.kind],
-      typeLabel: TYPE_RU[card.kind],
+      rows: card.rows,
+      priority: card.priority,
+      cost: card.cost,
+      statusBadge: card.statusBadge,
       extraStyle: card.extraStyle,
     };
   });
 
   // --- связи ---
-  const edges: EdgeNode[] = [];
+  // По эталону: задачи → гипотезы (серые тонкие), гипотезы → субъекты и цель
+  // (цвет и толщина по влиянию), субъекты → цель. Влияние гипотез на метрики
+  // визуально ведёт к цели (метрики — внутри карточки цели).
+  interface RawEdge {
+    from: string;
+    to: string;
+    kind: EdgeKind;
+    level: Level | null;
+  }
+  const rawEdges: RawEdge[] = [
+    ...map.tasks.map((t) => ({ from: t.id, to: t.hypothesis, kind: 'flow' as const, level: null })),
+    ...map.hypotheses.flatMap((h) => [
+      { from: h.id, to: h.subject, kind: 'flow' as const, level: h.influence },
+      { from: h.id, to: map.goal.id, kind: 'metric' as const, level: h.influence },
+    ]),
+    ...map.subjects.map((s) => ({
+      from: s.id,
+      to: map.goal.id,
+      kind: 'flow' as const,
+      level: s.influence,
+    })),
+    ...map.blockers.map((b) => ({ from: b.id, to: b.blocks, kind: 'block' as const, level: null })),
+  ];
 
-  const flowPath = (fromId: string, toId: string): string => {
-    const f = cards.get(fromId)!;
-    const t = cards.get(toId)!;
-    const fp = positions.get(fromId)!;
-    const tp = positions.get(toId)!;
+  // Входящие связи распределяем по правому краю карточки-цели.
+  const incoming = new Map<string, number>();
+  for (const e of rawEdges) {
+    incoming.set(e.to, (incoming.get(e.to) ?? 0) + 1);
+  }
+  const seenIncoming = new Map<string, number>();
+
+  const anchorY = (e: RawEdge): number => {
+    const t = cards.get(e.to)!;
+    const tp = positions.get(e.to)!;
+    const n = incoming.get(e.to) ?? 1;
+    if (n <= 1) return tp.y + t.height / 2;
+    const i = seenIncoming.get(e.to) ?? 0;
+    seenIncoming.set(e.to, i + 1);
+    const band = Math.max(t.height - 24, 1);
+    return tp.y + 12 + ((i + 0.5) * band) / n;
+  };
+
+  interface PathResult {
+    path: string;
+    start: { x: number; y: number };
+  }
+
+  const flowPath = (e: RawEdge): PathResult => {
+    const f = cards.get(e.from)!;
+    const t = cards.get(e.to)!;
+    const fp = positions.get(e.from)!;
+    const tp = positions.get(e.to)!;
     const x1 = fp.x;
     const y1 = fp.y + f.height / 2;
     const x2 = tp.x + t.w;
-    const y2 = tp.y + t.height / 2;
+    const y2 = anchorY(e);
     const k = COL_GAP * 0.55;
-    return `M ${x1} ${y1} C ${x1 - k} ${y1}, ${x2 + k} ${y2}, ${x2} ${y2}`;
+    return {
+      path: `M ${x1} ${y1} C ${x1 - k} ${y1}, ${x2 + k} ${y2}, ${x2} ${y2}`,
+      start: { x: x1, y: y1 },
+    };
   };
 
-  const metricArc = (fromId: string, toId: string): string => {
-    const f = cards.get(fromId)!;
-    const t = cards.get(toId)!;
-    const fp = positions.get(fromId)!;
-    const tp = positions.get(toId)!;
-    const x1 = fp.x + f.w / 2;
-    const y1 = fp.y - 4;
-    const x2 = tp.x + t.w / 2;
-    const y2 = tp.y - 4;
-    const lift = 56 + Math.abs(x1 - x2) * 0.04;
-    return `M ${x1} ${y1} C ${x1} ${y1 - lift}, ${x2} ${y2 - lift}, ${x2} ${y2}`;
-  };
-
-  const balancePath = (fromId: string, toId: string): string => {
-    const f = cards.get(fromId)!;
-    const t = cards.get(toId)!;
-    const fp = positions.get(fromId)!;
-    const tp = positions.get(toId)!;
-    const x1 = fp.x;
-    const y1 = fp.y + f.height / 2;
-    const x2 = tp.x;
-    const y2 = tp.y + t.height - 14;
-    return `M ${x1} ${y1} C ${x1 - 46} ${y1}, ${x2 - 46} ${y2}, ${x2} ${y2}`;
-  };
-
-  for (const t of map.tasks) {
-    edges.push({ from: t.id, to: t.hypothesis, kind: 'flow', level: null, path: flowPath(t.id, t.hypothesis) });
-  }
-  for (const h of map.hypotheses) {
-    edges.push({
-      from: h.id,
-      to: h.subject,
-      kind: 'flow',
-      level: h.influence,
-      path: flowPath(h.id, h.subject),
-    });
-    for (const mid of h.metrics) {
-      edges.push({ from: h.id, to: mid, kind: 'metric', level: h.influence, path: metricArc(h.id, mid) });
-    }
-  }
-  for (const s of map.subjects) {
-    edges.push({
-      from: s.id,
-      to: map.goal.id,
-      kind: 'flow',
-      level: s.influence,
-      path: flowPath(s.id, map.goal.id),
-    });
-  }
-  for (const m of map.goal.metrics) {
-    edges.push({
-      from: m.id,
-      to: map.goal.id,
-      kind: m.balancing ? 'balance' : 'flow',
-      level: null,
-      path: m.balancing ? balancePath(m.id, map.goal.id) : flowPath(m.id, map.goal.id),
-    });
-  }
-  for (const b of map.blockers) {
-    edges.push({ from: b.id, to: b.blocks, kind: 'block', level: null, path: flowPath(b.id, b.blocks) });
-  }
+  const edges: EdgeNode[] = rawEdges.map((e) => {
+    const r = flowPath(e);
+    return { ...e, path: r.path, start: r.start };
+  });
 
   return { cards: nodes, edges, width, height };
 }

@@ -79,13 +79,13 @@ export function MapView({ map }: Props) {
                   <marker
                     key={key}
                     id={`ah-${key}`}
-                    markerWidth="9"
-                    markerHeight="7"
-                    refX="8"
-                    refY="3.5"
+                    markerWidth="12"
+                    markerHeight="10"
+                    refX="10"
+                    refY="5"
                     orient="auto"
                   >
-                    <polygon points="0 0, 9 3.5, 0 7" fill={ARROW_STYLE[key]!.color} />
+                    <polygon points="0 0, 12 5, 0 10" fill={ARROW_STYLE[key]!.color} />
                   </marker>
                 ))}
               </defs>
@@ -94,13 +94,17 @@ export function MapView({ map }: Props) {
                 const active =
                   hovered !== null && (edge.from === hovered || edge.to === hovered);
                 const dim = hovered !== null && !active;
+                // дуги влияния на метрики — тонкие и приглушённые, чтобы не
+                // доминировать над основными связями
+                const metric = edge.kind === 'metric';
                 return (
                   <path
                     key={i}
                     d={edge.path}
                     fill="none"
                     stroke={ARROW_STYLE[key]!.color}
-                    strokeWidth={ARROW_STYLE[key]!.width}
+                    strokeWidth={metric ? 1.6 : ARROW_STYLE[key]!.width}
+                    opacity={metric ? 0.6 : undefined}
                     strokeDasharray={
                       edge.kind === 'metric' || edge.kind === 'balance' || edge.kind === 'block'
                         ? '6 5'
@@ -111,6 +115,17 @@ export function MapView({ map }: Props) {
                   />
                 );
               })}
+              {/* порты: точки крепления стрелок к карточкам-источникам */}
+              {layout.edges.map((edge, i) => (
+                <circle
+                  key={`p-${i}`}
+                  cx={edge.start.x}
+                  cy={edge.start.y}
+                  r={3.5}
+                  fill="#1f1f1f"
+                  className={hovered !== null && edge.from !== hovered && edge.to !== hovered ? 'dim' : undefined}
+                />
+              ))}
             </svg>
             {layout.cards.map((node) => (
               <CardView
@@ -124,24 +139,23 @@ export function MapView({ map }: Props) {
       </div>
 
       <div className="legend">
-        {(Object.keys(CARD_PALETTE) as Array<keyof typeof CARD_PALETTE>).map((kind) => (
-          <span key={kind} className="chip">
-            <i style={{ background: CARD_PALETTE[kind].fill, borderColor: CARD_PALETTE[kind].border }} />
-            {kind === 'goal'
-              ? 'цель'
-              : kind === 'metric'
-                ? 'метрика'
-                : kind === 'subject'
-                  ? 'субъект'
-                  : kind === 'hypothesis'
-                    ? 'гипотеза'
-                    : kind === 'task'
-                      ? 'задача'
-                      : 'блокер'}
-          </span>
-        ))}
+        <span className="chip">
+          <i style={{ background: CARD_PALETTE.goal.fill }} /> цель (метрики внутри)
+        </span>
+        <span className="chip">
+          <i style={{ background: CARD_PALETTE.subject.fill }} /> субъект
+        </span>
+        <span className="chip">
+          <i style={{ background: CARD_PALETTE.hypothesis.fill }} /> гипотеза
+        </span>
+        <span className="chip">
+          <i style={{ background: CARD_PALETTE.task.fill }} /> задача
+        </span>
+        <span className="chip">
+          <i style={{ background: CARD_PALETTE.blocker.fill }} /> блокер
+        </span>
+        <span className="chip">цифры на угле: влияние, затем затраты (1 — красный, 3 — зелёный)</span>
         <span className="chip">толще стрелка — сильнее влияние</span>
-        <span className="chip">пунктир — метрика/блокер</span>
       </div>
 
       <div className="zoom">

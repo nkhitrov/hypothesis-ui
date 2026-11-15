@@ -25,6 +25,7 @@ import { MapView } from './components/MapView';
 import { Sidebar } from './components/Sidebar';
 import { TextEditor } from './components/TextEditor';
 import { ImportDialog, type ImportPayload } from './components/ImportDialog';
+import { ConfirmDialog } from './components/ConfirmDialog';
 
 type View = 'board' | 'editor';
 
@@ -36,6 +37,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [indexTick, setIndexTick] = useState(0);
   const [importPayload, setImportPayload] = useState<ImportPayload | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -81,8 +83,13 @@ export default function App() {
   };
 
   const handleDelete = (id: string): void => {
-    const entry = index.find((e) => e.id === id);
-    if (!window.confirm(`Удалить карту «${entry?.title ?? id}»? Действие необратимо.`)) return;
+    setPendingDelete(id);
+  };
+
+  const confirmDelete = (): void => {
+    const id = pendingDelete;
+    setPendingDelete(null);
+    if (!id) return;
     deleteMap(id);
     setIndexTick((t) => t + 1);
     if (id === currentId) {
@@ -242,6 +249,17 @@ export default function App() {
             payload={importPayload}
             onConfirm={confirmImport}
             onCancel={() => setImportPayload(null)}
+          />
+        )}
+        {pendingDelete && (
+          <ConfirmDialog
+            title="Удалить карту?"
+            body={`Карта «${
+              index.find((e) => e.id === pendingDelete)?.title ?? pendingDelete
+            }» будет удалена безвозвратно.`}
+            confirmLabel="Удалить"
+            onConfirm={confirmDelete}
+            onCancel={() => setPendingDelete(null)}
           />
         )}
       </div>

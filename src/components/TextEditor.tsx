@@ -43,8 +43,8 @@ export function TextEditor({ map, onApply, onClose }: Props) {
       return;
     }
     onApply(parsed.data as HypothesisMap);
-    setText(serializeMap(parsed.data, format));
-    setErrors([]);
+    // успешное применение возвращает пользователя к доске (обновлённой)
+    onClose();
   };
 
   const revert = (): void => {
