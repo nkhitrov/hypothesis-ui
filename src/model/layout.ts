@@ -6,8 +6,8 @@ import type { HypothesisMap, Level } from '../types';
  * Маршрутизацию стрелок выполняет React Flow.
  */
 
-export type CardKind = 'goal' | 'subject' | 'hypothesis' | 'task' | 'blocker';
-export type EdgeKind = 'flow' | 'block';
+export type CardKind = 'goal' | 'metric' | 'subject' | 'hypothesis' | 'task' | 'blocker';
+export type EdgeKind = 'flow' | 'block' | 'sub' | 'metric';
 
 /** Строка карточки: жирная связка/заголовок + обычный текст. */
 export interface CardRow {
@@ -39,6 +39,10 @@ export interface EdgeNode {
   level: Level | null;
   sourceHandle: string;
   targetHandle: string;
+  /** Для дуг поверх доски: высота обхода над карточками. */
+  topY?: number;
+  /** Для отдельной метрики → цель: линия над колонкой целей. */
+  metricTopY?: number;
 }
 export interface Layout {
   cards: CardNode[];
@@ -58,6 +62,7 @@ const PAGE_PAD = 60;
 const COLUMN_ORDER: CardKind[] = ['goal', 'subject', 'hypothesis', 'task', 'blocker'];
 const COLUMN_W: Record<CardKind, number> = {
   goal: 400,
+  metric: 400, // отдельные метрики живут в колонке целей
   subject: 350,
   hypothesis: 350,
   task: 390,
@@ -68,6 +73,7 @@ const MIN_H: Partial<Record<CardKind, number>> = { goal: 400, task: 96 };
 /** Палитра карточек — по эталонному шаблону. */
 export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = {
   goal: { fill: '#b5cc68', border: '#93ab4a' },
+  metric: { fill: '#c9e4b4', border: '#93ab4a' },
   subject: { fill: '#f2b33d', border: '#cc9022' },
   hypothesis: { fill: '#f7e36b', border: '#d1bd42' },
   task: { fill: '#a9c7f0', border: '#84a5d6' },
@@ -99,6 +105,8 @@ class Card {
   cost: number | null = null;
   extraStyle?: string;
   incomingRight = 0;
+  /** Цель уровнем ниже: карточка уже и со сдвигом вправо (вложенность). */
+  subLevel = false;
 
   constructor(
     readonly id: string,
@@ -106,7 +114,7 @@ class Card {
   ) {}
 
   get w(): number {
-    return COLUMN_W[this.kind];
+    return this.subLevel ? Math.round(COLUMN_W[this.kind] * 0.85) : COLUMN_W[this.kind];
   }
   get pad(): number {
     return this.kind === 'task' ? TASK_PAD : PAD;
@@ -157,6 +165,31 @@ export function computeLayout(map: HypothesisMap): Layout {
   }
   cards.set(map.goal.id, goalCard);
 
+  // --- Дополнительные цели: 'top' — ещё одна цель верхнего уровня,
+  //     'sub' — цель уровнем ниже (порождена крупной задачей) ---
+  for (const g of map.goals ?? []) {
+    const c = new Card(g.id, 'goal');
+    const isSub = g.level === 'sub';
+    c.subLevel = isSub;
+    c.add('', isSub ? 'Подцель (уровень ниже)' : 'Цель', { boldText: true });
+    c.add('', g.description);
+    const gm = g.metrics ?? [];
+    if (gm.length > 0) {
+      c.add('', 'Метрики', { boldText: true });
+      for (const m of gm) c.add('', `${m.description}: ${m.current} → ${m.target}`);
+    }
+    cards.set(g.id, c);
+  }
+
+  // --- Отдельные карточки метрик (расширенная топология) ---
+  for (const m of map.metrics ?? []) {
+    const c = new Card(m.id, 'metric');
+    c.add('', `Метрика${m.balancing ? ' (балансирующая)' : ''}`, { boldText: true });
+    c.add('', m.description);
+    c.add('', `${m.current} → ${m.target}`);
+    cards.set(m.id, c);
+  }
+
   // --- Субъекты ---
   for (const s of map.subjects) {
     const c = new Card(s.id, 'subject');
@@ -169,6 +202,10 @@ export function computeLayout(map: HypothesisMap): Layout {
     if ((s.wishes ?? []).length > 0) {
       c.add('', 'Желания', { boldText: true });
       for (const wish of s.wishes ?? []) c.add('', wish);
+    }
+    if (s.negative) {
+      // негативный субъект — тот, кто мешает достижению цели: красная рамка
+      c.extraStyle = 'outline:3px solid #d15858;outline-offset:-3px';
     }
     cards.set(s.id, c);
   }
@@ -234,29 +271,50 @@ export function computeLayout(map: HypothesisMap): Layout {
   let x = PAGE_PAD;
   for (const column of COLUMN_ORDER) {
     let y = PAGE_PAD;
-    const ordered =
-      column === 'hypothesis'
-        ? sortedHypotheses.map((h) => h.id)
-        : column === 'task'
-          ? sortedTasks.map((t) => t.id)
-          : [...cards.entries()].filter(([, c]) => c.kind === column).map(([id]) => id);
+    let ordered: string[];
+    if (column === 'goal') {
+      // колонка целей: главная, затем 'top', затем 'sub' (со сдвигом), затем метрики
+      ordered = [
+        map.goal.id,
+        ...(map.goals ?? []).filter((g) => g.level !== 'sub').map((g) => g.id),
+        ...(map.goals ?? []).filter((g) => g.level === 'sub').map((g) => g.id),
+        ...(map.metrics ?? []).map((m) => m.id),
+      ];
+    } else if (column === 'hypothesis') {
+      ordered = sortedHypotheses.map((h) => h.id);
+    } else if (column === 'task') {
+      ordered = sortedTasks.map((t) => t.id);
+    } else {
+      ordered = [...cards.entries()].filter(([, c]) => c.kind === column).map(([id]) => id);
+    }
     for (const id of ordered) {
-      const card = cards.get(id)!;
-      positions.set(id, { x, y });
+      const card = cards.get(id);
+      if (!card) continue;
+      const shift = card.subLevel ? 56 : 0; // вложенность уровня ниже
+      positions.set(id, { x: x + shift, y });
       y += card.height + GAP_Y;
     }
     x += COLUMN_W[column] + (column === 'task' ? BLOCKER_GAP : COL_GAP);
   }
 
   // --- связи: каноническая топология «задача → гипотеза → субъект → цель» ---
-  // Влияние гипотез на метрики живёт в данных, но не рисуется: гипотеза
-  // воздействует на субъекта, субъект — на цель.
   interface RawEdge {
     from: string;
     to: string;
     kind: EdgeKind;
     level: Level | null;
+    fromTop?: boolean;
+    metricTopY?: number;
   }
+  // крупная задача → подцель уровнем ниже: дуга поверх доски
+  const topY =
+    Math.min(...[...cards.values()].map((c) => positions.get(c.id)!.y)) - 80;
+  // отдельные метрики → цель: линия над карточками колонки целей
+  const goalsTopY = Math.min(
+    positions.get(map.goal.id)!.y,
+    ...(map.goals ?? []).map((g) => positions.get(g.id)!.y),
+  );
+
   const rawEdges: RawEdge[] = [
     ...map.tasks.map((t) => ({ from: t.id, to: t.hypothesis, kind: 'flow' as const, level: null })),
     ...map.hypotheses.map((h) => ({
@@ -265,12 +323,33 @@ export function computeLayout(map: HypothesisMap): Layout {
       kind: 'flow' as const,
       level: h.influence,
     })),
-    ...map.subjects.map((s) => ({
-      from: s.id,
-      to: map.goal.id,
-      kind: 'flow' as const,
-      level: s.influence,
+    // субъект влияет на перечисленные цели либо на главную
+    ...map.subjects.flatMap((s) =>
+      (s.goals && s.goals.length > 0 ? s.goals : [map.goal.id]).map((gid) => ({
+        from: s.id,
+        to: gid,
+        kind: 'flow' as const,
+        level: s.influence,
+      })),
+    ),
+    // отдельные метрики → своя цель: дуга по левой стороне поверх целей
+    ...(map.metrics ?? []).map((m) => ({
+      from: m.id,
+      to: m.goalRef,
+      kind: 'metric' as EdgeKind,
+      level: null,
+      metricTopY: goalsTopY - 45,
     })),
+    // задача → подцель уровнем ниже (многоуровневая карта): дуга поверх доски
+    ...map.tasks
+      .filter((t) => t.goalRef)
+      .map((t) => ({
+        from: t.id,
+        to: t.goalRef!,
+        kind: 'sub' as EdgeKind,
+        level: null,
+        fromTop: true,
+      })),
     ...map.blockers.map((b) => ({ from: b.id, to: b.blocks, kind: 'block' as const, level: null })),
   ];
 
@@ -289,6 +368,8 @@ export function computeLayout(map: HypothesisMap): Layout {
       level: e.level,
       sourceHandle: 's-left',
       targetHandle: `t-${idx}`,
+      ...(e.fromTop ? { topY } : {}),
+      ...(e.kind === 'metric' ? { metricTopY: e.metricTopY } : {}),
     };
   });
 

@@ -26,6 +26,15 @@ export interface Goal {
   id: string;
   description: string;
   metrics: Metric[];
+  /** Дополнительные цели (многоцелевая карта): 'top' — ещё одна цель верхнего уровня, 'sub' — цель уровнем ниже. */
+  level?: 'top' | 'sub';
+  /** Для цели уровнем ниже: задача верхней карты, которая её породила. */
+  parentTask?: string;
+}
+
+export interface SeparatedMetric extends Metric {
+  /** Расширенная топология: метрика отдельной карточкой — к какой цели относится. */
+  goalRef: string;
 }
 
 export interface Subject {
@@ -36,6 +45,8 @@ export interface Subject {
   wishes?: string[];
   /** Негативный субъект — тот, кто препятствует достижению цели. */
   negative?: boolean;
+  /** Цели, на которые влияет субъект (многоцелевая карта); по умолчанию — главная. */
+  goals?: string[];
 }
 
 /** Формат «Если—то—потому что—тогда». */
@@ -58,6 +69,8 @@ export interface Task {
   description: string;
   owner?: string;
   due?: string;
+  /** Многоуровневая карта: крупная задача связана с целью уровнем ниже. */
+  goalRef?: string;
 }
 
 export interface Blocker {
@@ -73,6 +86,10 @@ export interface HypothesisMap {
   schemaVersion: 1;
   meta: MapMeta;
   goal: Goal;
+  /** Дополнительные цели: верхнего уровня ('top') и уровнем ниже ('sub'). */
+  goals?: Goal[];
+  /** Метрики отдельными карточками (расширенная топология). */
+  metrics?: SeparatedMetric[];
   subjects: Subject[];
   hypotheses: Hypothesis[];
   tasks: Task[];

@@ -63,7 +63,13 @@ export function validateMap(input: unknown): string[] {
     }
   };
   checkUnique('цель', [goal]);
+  const extraGoals = Array.isArray(map.goals) ? (map.goals as unknown as Entity[]) : [];
+  checkUnique('цель', extraGoals);
+  const separatedMetrics = Array.isArray(map.metrics)
+    ? (map.metrics as unknown as Entity[])
+    : [];
   checkUnique('метрика', metricList);
+  checkUnique('метрика', separatedMetrics);
   checkUnique('субъект', subjects);
   checkUnique('гипотеза', hypotheses);
   checkUnique('задача', tasks);
@@ -74,6 +80,31 @@ export function validateMap(input: unknown): string[] {
     errors.push(`${what}: ссылка на несуществующий id '${String(id)}'`);
     return false;
   };
+
+  // --- дополнительные цели и отдельные метрики (мягкие поля) ---
+  for (const g of extraGoals) {
+    const gid = isStr(g['id']) ? g['id'] : '?';
+    if (g['level'] !== undefined && g['level'] !== 'top' && g['level'] !== 'sub') {
+      errors.push(`цель '${gid}': недопустимый level '${String(g['level'])}' (top|sub)`);
+    }
+    if (isStr(g['parentTask']) && g['parentTask'] !== '') {
+      exists(g['parentTask'], `цель '${gid}' (parentTask)`);
+    }
+  }
+  for (const m of separatedMetrics) {
+    const mid = isStr(m['id']) ? m['id'] : '?';
+    for (const field of ['current', 'target'] as const) {
+      const value = m[field];
+      if (typeof value !== 'string' || value === '') {
+        errors.push(`метрика '${mid}': пустое поле '${field}'`);
+      }
+    }
+    if (isStr(m['goalRef']) && m['goalRef'] !== '') {
+      exists(m['goalRef'], `метрика '${mid}' (goalRef)`);
+    } else {
+      errors.push(`метрика '${mid}': не указана цель (поле 'goalRef')`);
+    }
+  }
 
   // --- метрики ---
   for (const m of metricList) {
@@ -93,6 +124,12 @@ export function validateMap(input: unknown): string[] {
       errors.push(
         `субъект '${sid}': недопустимое значение 'influence' = '${String(s['influence'])}' (${LEVELS.join('|')})`,
       );
+    }
+    const goalRefs = s['goals'];
+    if (goalRefs !== undefined && !isStrArray(goalRefs)) {
+      errors.push(`субъект '${sid}': 'goals' должен быть списком id целей`);
+    } else if (isStrArray(goalRefs)) {
+      for (const gid of goalRefs) exists(gid, `субъект '${sid}' (цель)`);
     }
   }
 
@@ -139,6 +176,9 @@ export function validateMap(input: unknown): string[] {
       exists(t['hypothesis'], `задача '${tid}'`);
     } else {
       errors.push(`задача '${tid}': не привязана к гипотезе`);
+    }
+    if (isStr(t['goalRef']) && t['goalRef'] !== '') {
+      exists(t['goalRef'], `задача '${tid}' (goalRef — цель уровнем ниже)`);
     }
   }
 

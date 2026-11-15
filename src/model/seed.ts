@@ -1,12 +1,16 @@
 import type { HypothesisMap } from '../types';
 
-/** Демонстрационная карта — конвертация прежнего map.yaml («Смены.Про»). */
+/**
+ * Демонстрационная карта «Смены.Про» — витрина топологий методологии:
+ * несколько целей, метрики отдельными карточками, негативные субъекты,
+ * переход из задачи в цель уровнем ниже, боли и желания субъектов.
+ */
 export const DEMO_MAP: HypothesisMap = {
   schemaVersion: 1,
   meta: {
-    title: 'Демо: «Смены.Про» — стратегия роста выручки',
+    title: 'Демо: «Смены.Про» — стратегия роста (все вариации топологий)',
     horizon: 'до конца 2027 года',
-    version: 1,
+    version: 2,
     date: '2026-11-16',
   },
   goal: {
@@ -29,11 +33,59 @@ export const DEMO_MAP: HypothesisMap = {
       },
     ],
   },
+  goals: [
+    {
+      id: 'goal-market',
+      description: 'Занять заметную долю рынка планирования смен в РФ',
+      level: 'top',
+      metrics: [
+        {
+          id: 'metric-referals',
+          description: 'Клиентов по рекомендации в квартал',
+          current: '3',
+          target: '12',
+        },
+      ],
+    },
+    {
+      id: 'goal-sandbox',
+      description: 'Запустить песочницу триала как отдельный продукт к Q1 2027',
+      level: 'sub',
+      parentTask: 'task-sandbox-mvp',
+      metrics: [
+        {
+          id: 'metric-activation',
+          description: 'Триалы с первым расписанием',
+          current: '40%',
+          target: '60%',
+        },
+      ],
+    },
+  ],
+  metrics: [
+    {
+      id: 'metric-nps',
+      description: 'NPS клиентов',
+      current: '31',
+      target: '45',
+      goalRef: 'goal-mrr',
+      balancing: false,
+    },
+    {
+      id: 'metric-share',
+      description: 'Доля рынка планирования смен',
+      current: '4%',
+      target: '12%',
+      goalRef: 'goal-market',
+      balancing: false,
+    },
+  ],
   subjects: [
     {
       id: 'subject-shift-lead',
       description: 'Руководитель смены на производстве (50–500 сотрудников)',
       influence: 'high',
+      goals: ['goal-mrr', 'goal-market'],
       pains: [
         'Планирует смены вручную в Excel — 6+ часов в неделю',
         'Текучка персонала постоянно ломает график',
@@ -50,6 +102,14 @@ export const DEMO_MAP: HypothesisMap = {
         'Опасается, что софт «выкинет» людей из процесса планирования',
       ],
       wishes: [],
+    },
+    {
+      id: 'subject-it',
+      description: 'ИТ-директор предприятия — против ещё одного облачного SaaS в контуре',
+      influence: 'medium',
+      negative: true,
+      pains: ['Ещё одна система без SSO и журналирования — лишний риск ИБ'],
+      wishes: ['On-premise вариант и интеграция с корпоративным SSO'],
     },
   ],
   hypotheses: [
@@ -90,6 +150,18 @@ export const DEMO_MAP: HypothesisMap = {
       because: 'HR снимает возражение ещё до того, как оно попадает в закупку',
       so: 'подготовить страницу, DPA-шаблон и FAQ для отдела ИБ',
     },
+    {
+      id: 'hyp-sso',
+      subject: 'subject-it',
+      metrics: ['metric-nps'],
+      influence: 'medium',
+      cost: 'high',
+      status: 'draft',
+      if: 'предложить ИТ-директору пилот с корпоративным SSO и on-premise в своей инфраструктуре',
+      then: 'NPS клиентов вырастет с 31 до 45, а блокирующие возражения ИБ исчезнут',
+      because: 'негативный субъект снимается, когда получает контроль: свой контур и единый вход',
+      so: 'собрать пилотный контур с SSO и журналированием для двух якорных клиентов',
+    },
   ],
   tasks: [
     {
@@ -109,9 +181,10 @@ export const DEMO_MAP: HypothesisMap = {
     {
       id: 'task-sandbox-mvp',
       hypothesis: 'hyp-sandbox',
-      description: 'MVP песочницы с генератором демо-смен',
+      description: 'MVP песочницы с генератором демо-смен (крупная — порождает подцель)',
       owner: 'Игорь (разработка)',
       due: '2026-12-15',
+      goalRef: 'goal-sandbox',
     },
     {
       id: 'task-sandbox-dashboard',
@@ -133,6 +206,20 @@ export const DEMO_MAP: HypothesisMap = {
       description: 'Типовой DPA и FAQ для отдела ИБ',
       owner: 'Марина (юрист)',
       due: '2026-12-10',
+    },
+    {
+      id: 'task-sso-pilot',
+      hypothesis: 'hyp-sso',
+      description: 'Пилотный контур SSO + on-premise для двух якорных клиентов',
+      owner: 'Игорь (разработка)',
+      due: '2027-01-20',
+    },
+    {
+      id: 'task-share-report',
+      hypothesis: 'hyp-live-demo',
+      description: 'Квартальный отчёт по доле рынка для цели «Рынок»',
+      owner: 'Костя (аналитика)',
+      due: '2026-12-25',
     },
   ],
   blockers: [

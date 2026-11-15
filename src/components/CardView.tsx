@@ -43,6 +43,12 @@ export function CardView({ data }: NodeProps<StickyNode>) {
       }}
     >
       <Handle type="source" position={Position.Left} id="s-left" style={HIDDEN_HANDLE} />
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="s-top"
+        style={{ ...HIDDEN_HANDLE, left: '50%', top: -3 }}
+      />
       {Array.from({ length: node.incomingRight }, (_, i) => (
         <Handle
           key={`r-${i}`}

@@ -12,12 +12,15 @@ import '@xyflow/react/dist/style.css';
 import type { HypothesisMap } from '../types';
 import { ARROW_STYLE, computeLayout } from '../model/layout';
 import { CardView, type StickyNodeData } from './CardView';
+import { SubgoalEdge } from './SubgoalEdge';
+import { MetricGoalEdge } from './MetricGoalEdge';
 
 interface Props {
   map: HypothesisMap;
 }
 
 const nodeTypes = { sticky: CardView };
+const edgeTypes = { subgoal: SubgoalEdge, metric: MetricGoalEdge };
 
 /** Доска на React Flow: карточки-узлы, стрелки с цельными наконечниками,
  * точечный фон, зум и панорамирование из коробки. Без анимаций. */
@@ -37,8 +40,12 @@ export function MapView({ map }: Props) {
     }));
     const rfEdges: Edge[] = layout.edges.map((e, i) => {
       const key = e.level ?? 'none';
-      const color = e.kind === 'block' ? '#cc7c7c' : ARROW_STYLE[key]!.color;
-      const width = ARROW_STYLE[key]!.width;
+      // задача→подцель (уровень ниже) — смысловая связь: тёмно-зелёная, заметная
+      const isSub = e.kind === 'sub';
+      const isMetric = e.kind === 'metric';
+      const color =
+        e.kind === 'block' ? '#cc7c7c' : isSub ? '#93ab4a' : ARROW_STYLE[key]!.color;
+      const width = isSub ? 3 : ARROW_STYLE[key]!.width;
       const markerSize = Math.round(8 + width * 3);
       return {
         id: `e-${i}`,
@@ -46,7 +53,9 @@ export function MapView({ map }: Props) {
         target: e.to,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
-        type: 'default',
+        type: isSub ? 'subgoal' : isMetric ? 'metric' : 'default',
+        ...(isSub ? { data: { topY: e.topY } } : {}),
+        ...(isMetric ? { data: { metricTopY: e.metricTopY } } : {}),
         style: { stroke: color, strokeWidth: width },
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -65,6 +74,7 @@ export function MapView({ map }: Props) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
         minZoom={0.05}
