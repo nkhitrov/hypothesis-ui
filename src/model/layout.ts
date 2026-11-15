@@ -1,14 +1,13 @@
 import type { HypothesisMap, Level } from '../types';
 
 /**
- * Колоночная раскладка по эталонному виду карты гипотез (шаблон Miro из базы
- * знаний методологии): крупные «стикерные» карточки — цель-квадрат с метриками
- * внутри, субъекты, вертикальные гипотезы с цифрами влияния и затрат на углу,
- * задачи-полосы. Текст крупный, связки «Если/то/потому что/тогда» — жирным.
+ * Раскладка карты для React Flow: позиции карточек с щедрыми отступами
+ * и связи с распределением точек входа по правому краю карточки-цели.
+ * Маршрутизацию стрелок выполняет React Flow.
  */
 
 export type CardKind = 'goal' | 'subject' | 'hypothesis' | 'task' | 'blocker';
-export type EdgeKind = 'flow' | 'metric' | 'balance' | 'block';
+export type EdgeKind = 'flow' | 'metric' | 'block';
 
 /** Строка карточки: жирная связка/заголовок + обычный текст. */
 export interface CardRow {
@@ -16,10 +15,6 @@ export interface CardRow {
   text: string;
   boldText?: boolean;
   cls?: string;
-}
-export interface CardBadge {
-  text: string;
-  cls: string;
 }
 export interface CardNode {
   id: string;
@@ -31,10 +26,10 @@ export interface CardNode {
   rows: CardRow[];
   /** Цифра влияния (1–3) в квадратике на левом верхнем углу. */
   priority: number | null;
-  /** Цифра затрат (1–3) — второй квадратик рядом. */
+  /** Цифра затрат (1–3) — квадратик на левом нижнем углу. */
   cost: number | null;
-  /** Статус гипотезы — маленький бейдж в правом верхнем углу. */
-  statusBadge: CardBadge | null;
+  /** Сколько связей входит в правый край карточки (для хэндлов). */
+  incomingRight: number;
   extraStyle?: string;
 }
 export interface EdgeNode {
@@ -42,25 +37,25 @@ export interface EdgeNode {
   to: string;
   kind: EdgeKind;
   level: Level | null;
-  path: string;
-  /** Точка крепления стрелки к карточке-источнику (порт). */
-  start: { x: number; y: number };
+  sourceHandle: string;
+  targetHandle: string;
+  /** Для дуг гипотеза→цель: ортогональный обход ниже этой отметки. */
+  lowY?: number;
 }
 export interface Layout {
   cards: CardNode[];
   edges: EdgeNode[];
-  width: number;
-  height: number;
 }
 
-// --- Геометрия и типографика (масштаб «стикера» из эталона) ---
-const CHAR_W = 10.4; // средняя ширина символа кириллицы при 19px
-const LINE_H = 28; // 19px × 1.5
+// --- Геометрия (щедрые отступы для «воздушной» компоновки) ---
+const CHAR_W = 10.4;
+const LINE_H = 28;
 const PAD = 24;
 const TASK_PAD = 18;
-const GAP_Y = 26;
-const COL_GAP = 120;
-const PAGE_PAD = 40;
+const GAP_Y = 48;
+const COL_GAP = 240;
+const BLOCKER_GAP = 120; // блокер стоит ближе к задачам, которые блокирует
+const PAGE_PAD = 60;
 
 const COLUMN_ORDER: CardKind[] = ['goal', 'subject', 'hypothesis', 'task', 'blocker'];
 const COLUMN_W: Record<CardKind, number> = {
@@ -70,10 +65,9 @@ const COLUMN_W: Record<CardKind, number> = {
   task: 390,
   blocker: 300,
 };
-/** Минимальная высота: цель — квадрат, задачи — полосы. */
 const MIN_H: Partial<Record<CardKind, number>> = { goal: 400, task: 96 };
 
-/** Палитра карточек — по эталонному шаблону (зелёный/янтарный/соломенный/васильковый). */
+/** Палитра карточек — по эталонному шаблону. */
 export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = {
   goal: { fill: '#b5cc68', border: '#93ab4a' },
   subject: { fill: '#f2b33d', border: '#cc9022' },
@@ -91,25 +85,13 @@ export const PRIORITY_COLORS: Record<number, string> = {
 
 export const LEVEL_TO_PRIORITY: Record<Level, number> = { high: 1, medium: 2, low: 3 };
 
-/** Цвет и толщина стрелки по силе влияния. */
+/** Цвет и толщина стрелки по силе влияния: толщина линиям — по спецификации,
+ * заметно ступенчатая (толще — сильнее влияние). */
 export const ARROW_STYLE: Record<string, { color: string; width: number }> = {
-  high: { color: '#e05a5a', width: 3.5 },
-  medium: { color: '#e8a33d', width: 2.6 },
+  high: { color: '#e05a5a', width: 4.5 },
+  medium: { color: '#e8a33d', width: 3.2 },
   low: { color: '#7cb342', width: 2 },
-  none: { color: '#8a8f98', width: 1.8 },
-};
-
-const STATUS_RU: Record<string, string> = {
-  draft: 'черновик',
-  'to-verify': 'к проверке',
-  confirmed: 'подтверждена',
-  refuted: 'опровергнута',
-};
-const STATUS_CLS: Record<string, string> = {
-  draft: 'st-draft',
-  'to-verify': 'st-verify',
-  confirmed: 'st-ok',
-  refuted: 'st-fail',
+  none: { color: '#8a8f98', width: 2.5 },
 };
 
 class Card {
@@ -117,8 +99,8 @@ class Card {
   private lineCount = 0;
   priority: number | null = null;
   cost: number | null = null;
-  statusBadge: CardBadge | null = null;
   extraStyle?: string;
+  incomingRight = 0;
 
   constructor(
     readonly id: string,
@@ -136,7 +118,6 @@ class Card {
     return Math.max(MIN_H[this.kind] ?? 0, h);
   }
 
-  /** Строка с жирной связкой (label) и обычным текстом. */
   add(label: string, text: string, opts: { boldText?: boolean; cls?: string } = {}): void {
     this.rows.push({ label: label || undefined, text, ...opts });
     const full = `${label} ${text}`.trim();
@@ -191,26 +172,26 @@ export function computeLayout(map: HypothesisMap): Layout {
       c.add('', 'Желания', { boldText: true });
       for (const wish of s.wishes ?? []) c.add('', wish);
     }
-    if (s.negative) c.statusBadge = { text: 'негативный субъект', cls: 'bg-neg' };
     cards.set(s.id, c);
   }
 
-  // --- Гипотезы: две цифры (влияние, затраты), связки жирным ---
+  // --- Гипотезы: связки жирным, статусы — только оформлением ---
   for (const h of map.hypotheses) {
     const c = new Card(h.id, 'hypothesis');
     c.priority = LEVEL_TO_PRIORITY[h.influence] ?? null;
     c.cost = LEVEL_TO_PRIORITY[h.cost] ?? null;
-    c.statusBadge = { text: STATUS_RU[h.status] ?? '?', cls: STATUS_CLS[h.status] ?? '' };
     c.add('Если', h.if);
     c.add('то', h.then);
     c.add('потому что', h.because);
     c.add('тогда', h.so);
     c.extraStyle =
-      h.status === 'refuted'
-        ? 'opacity:.55'
-        : h.status === 'draft'
-          ? 'outline:2px dashed #8a8f98;outline-offset:-2px'
-          : undefined;
+      h.status === 'confirmed'
+        ? 'outline:3px solid #2f8f2f;outline-offset:-3px'
+        : h.status === 'refuted'
+          ? 'opacity:.55'
+          : h.status === 'draft'
+            ? 'outline:2px dashed #8a8f98;outline-offset:-2px'
+            : undefined;
     cards.set(h.id, c);
   }
 
@@ -235,22 +216,88 @@ export function computeLayout(map: HypothesisMap): Layout {
     cards.set(b.id, c);
   }
 
+  // --- порядок в колонках: приоритетные гипотезы выше, задачи — рядом со своими гипотезами ---
+  const hypothesisOrder = new Map(
+    [...map.hypotheses]
+      .sort((a, b) => LEVEL_TO_PRIORITY[a.influence] - LEVEL_TO_PRIORITY[b.influence])
+      .map((h, i) => [h.id, i]),
+  );
+  const sortedHypotheses = [...map.hypotheses].sort(
+    (a, b) =>
+      (hypothesisOrder.get(a.id) ?? 0) - (hypothesisOrder.get(b.id) ?? 0),
+  );
+  const sortedTasks = [...map.tasks].sort(
+    (a, b) =>
+      (hypothesisOrder.get(a.hypothesis) ?? 0) - (hypothesisOrder.get(b.hypothesis) ?? 0),
+  );
+
   // --- позиции ---
   const positions = new Map<string, { x: number; y: number }>();
   let x = PAGE_PAD;
-  let maxBottom = 0;
   for (const column of COLUMN_ORDER) {
     let y = PAGE_PAD;
-    for (const [id, card] of cards) {
-      if (card.kind !== column) continue;
+    const ordered =
+      column === 'hypothesis'
+        ? sortedHypotheses.map((h) => h.id)
+        : column === 'task'
+          ? sortedTasks.map((t) => t.id)
+          : [...cards.entries()].filter(([, c]) => c.kind === column).map(([id]) => id);
+    for (const id of ordered) {
+      const card = cards.get(id)!;
       positions.set(id, { x, y });
       y += card.height + GAP_Y;
     }
-    maxBottom = Math.max(maxBottom, y - GAP_Y);
-    x += COLUMN_W[column] + COL_GAP;
+    x += COLUMN_W[column] + (column === 'task' ? BLOCKER_GAP : COL_GAP);
   }
-  const width = x - COL_GAP + PAGE_PAD;
-  const height = maxBottom + PAGE_PAD;
+
+  // --- связи: точки входа распределяем по правому краю карточки-цели ---
+  interface RawEdge {
+    from: string;
+    to: string;
+    kind: EdgeKind;
+    level: Level | null;
+  }
+  const rawEdges: RawEdge[] = [
+    ...map.tasks.map((t) => ({ from: t.id, to: t.hypothesis, kind: 'flow' as const, level: null })),
+    ...map.hypotheses.flatMap((h) => [
+      { from: h.id, to: h.subject, kind: 'flow' as const, level: h.influence },
+      // влияние на метрики → дуга к цели с обходом колонки субъектов снизу
+      { from: h.id, to: map.goal.id, kind: 'metric' as const, level: h.influence },
+    ]),
+    ...map.subjects.map((s) => ({
+      from: s.id,
+      to: map.goal.id,
+      kind: 'flow' as const,
+      level: s.influence,
+    })),
+    ...map.blockers.map((b) => ({ from: b.id, to: b.blocks, kind: 'block' as const, level: null })),
+  ];
+
+  // Все стрелки входят в правую грань карточки-цели; точки распределяем
+  // по высоте грани. Дуги гипотеза→цель обходят колонку субъектов снизу:
+  // размеры узлов фиксированы раскладкой, поэтому низ субъектов известен точно.
+  const subjectsBottom = Math.max(
+    ...[...cards.values()]
+      .filter((c) => c.kind === 'subject')
+      .map((c) => positions.get(c.id)!.y + c.height),
+  );
+  const lowY = subjectsBottom + 70;
+
+  const incomingIdx = new Map<string, number>();
+  const edges: EdgeNode[] = rawEdges.map((e) => {
+    const idx = incomingIdx.get(e.to) ?? 0;
+    incomingIdx.set(e.to, idx + 1);
+    cards.get(e.to)!.incomingRight = Math.max(cards.get(e.to)!.incomingRight, idx + 1);
+    return {
+      from: e.from,
+      to: e.to,
+      kind: e.kind,
+      level: e.level,
+      sourceHandle: 's-left',
+      targetHandle: `t-${idx}`,
+      ...(e.kind === 'metric' && lowY !== undefined ? { lowY } : {}),
+    };
+  });
 
   const nodes: CardNode[] = [...cards.entries()].map(([id, card]) => {
     const pos = positions.get(id)!;
@@ -264,79 +311,10 @@ export function computeLayout(map: HypothesisMap): Layout {
       rows: card.rows,
       priority: card.priority,
       cost: card.cost,
-      statusBadge: card.statusBadge,
+      incomingRight: card.incomingRight,
       extraStyle: card.extraStyle,
     };
   });
 
-  // --- связи ---
-  // По эталону: задачи → гипотезы (серые тонкие), гипотезы → субъекты и цель
-  // (цвет и толщина по влиянию), субъекты → цель. Влияние гипотез на метрики
-  // визуально ведёт к цели (метрики — внутри карточки цели).
-  interface RawEdge {
-    from: string;
-    to: string;
-    kind: EdgeKind;
-    level: Level | null;
-  }
-  const rawEdges: RawEdge[] = [
-    ...map.tasks.map((t) => ({ from: t.id, to: t.hypothesis, kind: 'flow' as const, level: null })),
-    ...map.hypotheses.flatMap((h) => [
-      { from: h.id, to: h.subject, kind: 'flow' as const, level: h.influence },
-      { from: h.id, to: map.goal.id, kind: 'metric' as const, level: h.influence },
-    ]),
-    ...map.subjects.map((s) => ({
-      from: s.id,
-      to: map.goal.id,
-      kind: 'flow' as const,
-      level: s.influence,
-    })),
-    ...map.blockers.map((b) => ({ from: b.id, to: b.blocks, kind: 'block' as const, level: null })),
-  ];
-
-  // Входящие связи распределяем по правому краю карточки-цели.
-  const incoming = new Map<string, number>();
-  for (const e of rawEdges) {
-    incoming.set(e.to, (incoming.get(e.to) ?? 0) + 1);
-  }
-  const seenIncoming = new Map<string, number>();
-
-  const anchorY = (e: RawEdge): number => {
-    const t = cards.get(e.to)!;
-    const tp = positions.get(e.to)!;
-    const n = incoming.get(e.to) ?? 1;
-    if (n <= 1) return tp.y + t.height / 2;
-    const i = seenIncoming.get(e.to) ?? 0;
-    seenIncoming.set(e.to, i + 1);
-    const band = Math.max(t.height - 24, 1);
-    return tp.y + 12 + ((i + 0.5) * band) / n;
-  };
-
-  interface PathResult {
-    path: string;
-    start: { x: number; y: number };
-  }
-
-  const flowPath = (e: RawEdge): PathResult => {
-    const f = cards.get(e.from)!;
-    const t = cards.get(e.to)!;
-    const fp = positions.get(e.from)!;
-    const tp = positions.get(e.to)!;
-    const x1 = fp.x;
-    const y1 = fp.y + f.height / 2;
-    const x2 = tp.x + t.w;
-    const y2 = anchorY(e);
-    const k = COL_GAP * 0.55;
-    return {
-      path: `M ${x1} ${y1} C ${x1 - k} ${y1}, ${x2 + k} ${y2}, ${x2} ${y2}`,
-      start: { x: x1, y: y1 },
-    };
-  };
-
-  const edges: EdgeNode[] = rawEdges.map((e) => {
-    const r = flowPath(e);
-    return { ...e, path: r.path, start: r.start };
-  });
-
-  return { cards: nodes, edges, width, height };
+  return { cards: nodes, edges };
 }
