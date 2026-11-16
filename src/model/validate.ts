@@ -183,6 +183,17 @@ export function validateMap(input: unknown): string[] {
         );
       }
     }
+    // метрики субъекта принадлежат только целям самого субъекта
+    if (isStrArray(metricRefs)) {
+      for (const mid of metricRefs) {
+        const m = separatedMetrics.find((x) => x['id'] === mid);
+        if (m && isStr(m['goalRef']) && !goalIds.includes(m['goalRef'])) {
+          errors.push(
+            `субъект '${sid}': метрика '${mid}' принадлежит цели '${m['goalRef']}', которой нет в целях субъекта`,
+          );
+        }
+      }
+    }
   }
 
   // --- боли/желания: мотивация → субъект ---
@@ -217,14 +228,41 @@ export function validateMap(input: unknown): string[] {
     }
     if (h['subject'] !== undefined) {
       errors.push(
-        `гипотеза '${hid}': поле 'subject' переименовано в 'target' (субъект, его боль/желание или цель для бессубъектного контура)`,
+        `гипотеза '${hid}': поле 'subject' переименовано в 'target' (субъект, его боль/желание, метрика или цель для бессубъектного контура)`,
       );
     }
     link(
       h['target'],
       `гипотеза '${hid}' (target)`,
-      ['субъект', 'мотивация', 'цель'],
+      ['субъект', 'мотивация', 'цель', 'метрика'],
     );
+    // вынесенный уровень не обходится: цель с вынесенными метриками принимает
+    // связи только через свои метрики; субъект с вынесенной мотивацией —
+    // только через свои боли/желания (даже если она одна)
+    const targetId = isStr(h['target']) ? h['target'] : '';
+    const targetKind = seen.get(targetId);
+    if (targetKind === 'цель') {
+      const goalMetrics = separatedMetrics
+        .filter((m) => m['goalRef'] === targetId)
+        .map((m) => (isStr(m['id']) ? m['id'] : ''))
+        .filter(Boolean);
+      if (goalMetrics.length > 0) {
+        errors.push(
+          `гипотеза '${hid}': цель '${targetId}' имеет вынесенные метрики (${goalMetrics.join(', ')}) — привяжите гипотезу к метрике (бессубъектный контур), а не к цели`,
+        );
+      }
+    }
+    if (targetKind === 'субъект') {
+      const subjectMos = motivations
+        .filter((mo) => mo['subject'] === targetId)
+        .map((mo) => (isStr(mo['id']) ? mo['id'] : ''))
+        .filter(Boolean);
+      if (subjectMos.length > 0) {
+        errors.push(
+          `гипотеза '${hid}': у субъекта '${targetId}' вынесены боли/желания (${subjectMos.join(', ')}) — привяжите гипотезу к ним, а не к субъекту`,
+        );
+      }
+    }
     const hypMetrics = h['metrics'];
     if (!isStrArray(hypMetrics) || hypMetrics.length === 0) {
       errors.push(`гипотеза '${hid}': не указана ни одна метрика влияния`);
