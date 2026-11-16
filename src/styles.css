@@ -514,3 +514,45 @@ button {
   justify-content: flex-end;
   margin-top: 14px;
 }
+
+/* ---------- Полноэкранный отказ от рендера невалидной карты ---------- */
+
+.invalid-map {
+  flex: 1;
+  overflow: auto;
+  padding: 48px 56px;
+  background: #faf6f0;
+}
+
+.invalid-map h1 {
+  font-size: 26px;
+  margin: 0 0 12px;
+  color: #a94848;
+}
+
+.invalid-map p {
+  max-width: 760px;
+  font-size: 17px;
+  line-height: 1.5;
+  color: #444;
+}
+
+.invalid-map .error-list {
+  max-width: 760px;
+  margin: 20px 0;
+  background: #fff;
+  border: 1px solid #e3c8c8;
+  border-radius: 8px;
+  padding: 18px 22px;
+}
+
+.invalid-map-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.invalid-map-note {
+  margin-top: 22px;
+  font-size: 14px;
+  color: #777;
+}

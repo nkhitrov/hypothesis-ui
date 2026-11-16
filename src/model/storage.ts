@@ -1,5 +1,5 @@
 import type { HypothesisMap } from '../types';
-import { DEMO_MAP } from './seed';
+import { DEMO_MAPS } from './seed';
 
 /**
  * Хранение карт в localStorage (см. openspec/changes/add-web-app/specs/map-storage):
@@ -147,13 +147,16 @@ export function duplicateMap(id: string): { id: string; map: HypothesisMap } | n
   return { id: newMapId, map: copy };
 }
 
-/** Первый запуск: пустое хранилище → предзагрузка демо-карты. */
+/** Первый запуск: пустое хранилище → предзагрузка демо-карт
+ * (основная — «Притча о гончаре», пример из базы знаний). */
 export function bootstrap(): { index: MapIndexEntry[]; currentId: string } {
   let index = loadIndex();
   if (index.length === 0) {
-    const id = 'demo-smennsy-pro';
-    saveMap(id, structuredClone(DEMO_MAP));
+    for (const demo of DEMO_MAPS) {
+      saveMap(demo.id, structuredClone(demo.map));
+    }
     index = loadIndex();
   }
-  return { index, currentId: index[0]!.id };
+  const preferred = index.find((e) => e.id === 'demo-gonchar');
+  return { index, currentId: (preferred ?? index[0])!.id };
 }

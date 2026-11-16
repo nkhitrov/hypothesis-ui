@@ -1,13 +1,30 @@
-import type { HypothesisMap, Level } from '../types';
+import type { HypothesisMap, Level, MotivationKind } from '../types';
 
 /**
- * Раскладка карты для React Flow: позиции карточек с щедрыми отступами
- * и связи с распределением точек входа по правому краю карточки-цели.
- * Маршрутизацию стрелок выполняет React Flow.
+ * Раскладка карты для React Flow: строго горизонтальная карта,
+ * стрелки идут только справа налево и входят в правую грань карточки.
+ *
+ * Колонки: цель | метрика | субъект | боль/желание | гипотеза | задача | блокер
+ * (метрики — справа от целей, мотивация — справа от субъектов, стандарт 1.2).
+ *
+ * Раскладка полосная: карточки выравниваются по «полосе» своей ветки —
+ * субъекты и метрики встают на свои точки входа в цель (стрелки почти
+ * горизонтальны по построению), цель при необходимости растягивается вниз,
+ * чтобы равномерно распределённые по грани точки входа разошлись по полосам.
+ * Позиции, точки входа и ширины колонок уточняются итеративно до сходимости;
+ * коридоры стрелок субъект→цель считаются по фактической кривизне безье
+ * в зоне колонки метрик, поэтому метрики не пересекаются стрелками.
  */
 
-export type CardKind = 'goal' | 'metric' | 'subject' | 'hypothesis' | 'task' | 'blocker';
-export type EdgeKind = 'flow' | 'block' | 'sub' | 'metric';
+export type CardKind =
+  | 'goal'
+  | 'metric'
+  | 'subject'
+  | 'motivation'
+  | 'hypothesis'
+  | 'task'
+  | 'blocker';
+export type EdgeKind = 'flow' | 'block';
 
 /** Строка карточки: жирная связка/заголовок + обычный текст. */
 export interface CardRow {
@@ -30,6 +47,8 @@ export interface CardNode {
   cost: number | null;
   /** Сколько связей входит в правый край карточки (для хэндлов). */
   incomingRight: number;
+  /** Переопределение цвета (негативный субъект). */
+  fill?: string;
   extraStyle?: string;
 }
 export interface EdgeNode {
@@ -39,10 +58,6 @@ export interface EdgeNode {
   level: Level | null;
   sourceHandle: string;
   targetHandle: string;
-  /** Для дуг поверх доски: высота обхода над карточками. */
-  topY?: number;
-  /** Для отдельной метрики → цель: линия над колонкой целей. */
-  metricTopY?: number;
 }
 export interface Layout {
   cards: CardNode[];
@@ -54,48 +69,82 @@ const CHAR_W = 10.4;
 const LINE_H = 28;
 const PAD = 24;
 const TASK_PAD = 18;
-const GAP_Y = 48;
-const COL_GAP = 240;
-const BLOCKER_GAP = 120; // блокер стоит ближе к задачам, которые блокирует
+const GAP_Y = 48; // между группами/полосами
+const INNER_GAP = 28; // внутри группы (стек метрик/мотиваций/гипотез/задач)
 const PAGE_PAD = 60;
+/** Зазоры между колонками: метрики и мотивация прижаты к своим владельцам. */
+const COL_GAP = 240;
+const OWNER_GAP = 170; // цель→метрика, субъект→мотивация
+const BLOCKER_GAP = 120;
 
-const COLUMN_ORDER: CardKind[] = ['goal', 'subject', 'hypothesis', 'task', 'blocker'];
+/** Порядок колонок слева направо; стрелки идут справа налево. */
+const COLUMN_ORDER: CardKind[] = [
+  'goal',
+  'metric',
+  'subject',
+  'motivation',
+  'hypothesis',
+  'task',
+  'blocker',
+];
 const COLUMN_W: Record<CardKind, number> = {
   goal: 400,
-  metric: 400, // отдельные метрики живут в колонке целей
+  metric: 320,
   subject: 350,
+  motivation: 320,
   hypothesis: 350,
   task: 390,
   blocker: 300,
 };
-const MIN_H: Partial<Record<CardKind, number>> = { goal: 400, task: 96 };
+const COLUMN_GAP_AFTER: Partial<Record<CardKind, number>> = {
+  goal: OWNER_GAP,
+  metric: COL_GAP,
+  subject: OWNER_GAP,
+  motivation: COL_GAP,
+  hypothesis: COL_GAP,
+  task: BLOCKER_GAP,
+};
+const MIN_H: Partial<Record<CardKind, number>> = { goal: 340, task: 96 };
 
-/** Палитра карточек — по эталонному шаблону. */
+/** Порог пологости стрелки: |Δy| ≤ SLOPE_MAX · Δx. Безье локально круче
+ *  прямой между концами (~1.5×), поэтому порог ужесточён до ~24° среднего. */
+const SLOPE_MAX = 0.45;
+
+const average = (xs: number[]): number =>
+  xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+
+const smoothstep = (t: number): number => 3 * t * t - 2 * t * t * t;
+
+/** Палитра — цветовая кодировка стандарта 1.2 (не менять). */
 export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = {
-  goal: { fill: '#b5cc68', border: '#93ab4a' },
-  metric: { fill: '#c9e4b4', border: '#93ab4a' },
-  subject: { fill: '#f2b33d', border: '#cc9022' },
-  hypothesis: { fill: '#f7e36b', border: '#d1bd42' },
-  task: { fill: '#a9c7f0', border: '#84a5d6' },
-  blocker: { fill: '#f2a6a6', border: '#cc7c7c' },
+  goal: { fill: '#cadf58', border: '#a3b544' },
+  metric: { fill: '#cadf58', border: '#a3b544' },
+  subject: { fill: '#ffc831', border: '#d9a41f' },
+  motivation: { fill: '#ffc831', border: '#d9a41f' },
+  hypothesis: { fill: '#ffef73', border: '#d9c94a' },
+  task: { fill: '#a6cdff', border: '#84a5d6' },
+  blocker: { fill: '#ffa391', border: '#d98070' },
 };
 
-/** Цифры на карточках: 1 — красный (высокий), 2 — оранжевый, 3 — зелёный (низкий). */
+/** Негативный субъект — отдельный цвет стандарта. */
+const NEGATIVE_SUBJECT_FILL = '#ffb373';
+
+/** Цифры на карточках (элемент): 1 — высокое (красный), 2 — средний, 3 — низкий. */
 export const PRIORITY_COLORS: Record<number, string> = {
-  1: '#e05a5a',
-  2: '#e8a33d',
-  3: '#7cb342',
+  1: '#ff7373',
+  2: '#ffd723',
+  3: '#9ee25b',
 };
 
 export const LEVEL_TO_PRIORITY: Record<Level, number> = { high: 1, medium: 2, low: 3 };
 
-/** Цвет и толщина стрелки по силе влияния: толщина линиям — по спецификации,
- * заметно ступенчатая (толще — сильнее влияние). */
+/** Цвет и толщина стрелки по силе влияния (приоритет относительно соседа слева):
+ * высокий — толстая красная, средний — жёлтая, низкий — тонкая зелёная. */
 export const ARROW_STYLE: Record<string, { color: string; width: number }> = {
-  high: { color: '#e05a5a', width: 4.5 },
-  medium: { color: '#e8a33d', width: 3.2 },
-  low: { color: '#7cb342', width: 2 },
-  none: { color: '#8a8f98', width: 2.5 },
+  high: { color: '#ff7373', width: 4.5 },
+  medium: { color: '#ffc831', width: 3.2 },
+  low: { color: '#8fd14f', width: 2 },
+  none: { color: '#70736d', width: 2.5 },
 };
 
 class Card {
@@ -103,10 +152,11 @@ class Card {
   private lineCount = 0;
   priority: number | null = null;
   cost: number | null = null;
+  fill?: string;
   extraStyle?: string;
   incomingRight = 0;
-  /** Цель уровнем ниже: карточка уже и со сдвигом вправо (вложенность). */
-  subLevel = false;
+  /** Динамическая минимальная высота (цель растягивается под точки входа). */
+  minHeight = 0;
 
   constructor(
     readonly id: string,
@@ -114,14 +164,14 @@ class Card {
   ) {}
 
   get w(): number {
-    return this.subLevel ? Math.round(COLUMN_W[this.kind] * 0.85) : COLUMN_W[this.kind];
+    return COLUMN_W[this.kind];
   }
   get pad(): number {
     return this.kind === 'task' ? TASK_PAD : PAD;
   }
   get height(): number {
     const h = 2 * this.pad + this.lineCount * LINE_H + (this.rows.length - 1) * 4;
-    return Math.max(MIN_H[this.kind] ?? 0, h);
+    return Math.max(MIN_H[this.kind] ?? 0, h, this.minHeight);
   }
 
   add(label: string, text: string, opts: { boldText?: boolean; cls?: string } = {}): void {
@@ -146,44 +196,42 @@ function wrapCount(text: string, maxChars: number): number {
   return lines + (cur > 0 ? 1 : 0);
 }
 
+const MOTIVATION_LABEL: Record<MotivationKind, string> = { pain: 'Боль', wish: 'Желание' };
+
+/** Группа карточек колонки с предпочтительной позицией (центр полосы). */
+interface Stack {
+  ids: string[];
+  preferredCenter: number;
+}
+
 export function computeLayout(map: HypothesisMap): Layout {
   const cards = new Map<string, Card>();
 
-  // --- Цель: метрики внутри карточки, как в эталоне ---
-  const goalCard = new Card(map.goal.id, 'goal');
-  goalCard.add('', 'Цель', { boldText: true });
-  goalCard.add('', map.goal.description);
-  const main = map.goal.metrics.filter((m) => !m.balancing);
-  if (main.length > 0) {
-    goalCard.add('', 'Метрики', { boldText: true });
-    for (const m of main) goalCard.add('', `${m.description}: ${m.current} → ${m.target}`);
-  }
-  const balancing = map.goal.metrics.filter((m) => m.balancing);
-  if (balancing.length > 0) {
-    goalCard.add('', 'Балансирующие метрики', { boldText: true });
-    for (const m of balancing) goalCard.add('', `${m.description}: ${m.current} → ${m.target}`);
-  }
-  cards.set(map.goal.id, goalCard);
-
-  // --- Дополнительные цели: 'top' — ещё одна цель верхнего уровня,
-  //     'sub' — цель уровнем ниже (порождена крупной задачей) ---
-  for (const g of map.goals ?? []) {
+  // --- Цели: метрики внутри карточки (классическая топология) ---
+  const goalCard = (g: typeof map.goal): Card => {
     const c = new Card(g.id, 'goal');
-    const isSub = g.level === 'sub';
-    c.subLevel = isSub;
-    c.add('', isSub ? 'Подцель (уровень ниже)' : 'Цель', { boldText: true });
+    c.add('', 'Цель', { boldText: true });
     c.add('', g.description);
-    const gm = g.metrics ?? [];
-    if (gm.length > 0) {
+    const main = g.metrics.filter((m) => !m.balancing);
+    if (main.length > 0) {
       c.add('', 'Метрики', { boldText: true });
-      for (const m of gm) c.add('', `${m.description}: ${m.current} → ${m.target}`);
+      for (const m of main) c.add('', `${m.description}: ${m.current} → ${m.target}`);
     }
-    cards.set(g.id, c);
-  }
+    const balancing = g.metrics.filter((m) => m.balancing);
+    if (balancing.length > 0) {
+      c.add('', 'Балансирующие метрики', { boldText: true });
+      for (const m of balancing) c.add('', `${m.description}: ${m.current} → ${m.target}`);
+    }
+    return c;
+  };
+  cards.set(map.goal.id, goalCard(map.goal));
+  for (const g of map.goals ?? []) cards.set(g.id, goalCard(g));
+  const allGoals = [map.goal, ...(map.goals ?? [])];
 
-  // --- Отдельные карточки метрик (расширенная топология) ---
+  // --- Отдельные метрики: справа от целей, влияние относительно цели ---
   for (const m of map.metrics ?? []) {
     const c = new Card(m.id, 'metric');
+    c.priority = LEVEL_TO_PRIORITY[m.influence] ?? null;
     c.add('', `Метрика${m.balancing ? ' (балансирующая)' : ''}`, { boldText: true });
     c.add('', m.description);
     c.add('', `${m.current} → ${m.target}`);
@@ -203,11 +251,17 @@ export function computeLayout(map: HypothesisMap): Layout {
       c.add('', 'Желания', { boldText: true });
       for (const wish of s.wishes ?? []) c.add('', wish);
     }
-    if (s.negative) {
-      // негативный субъект — тот, кто мешает достижению цели: красная рамка
-      c.extraStyle = 'outline:3px solid #d15858;outline-offset:-3px';
-    }
+    if (s.negative) c.fill = NEGATIVE_SUBJECT_FILL;
     cards.set(s.id, c);
+  }
+
+  // --- Боли и желания отдельными карточками ---
+  for (const mo of map.motivations ?? []) {
+    const c = new Card(mo.id, 'motivation');
+    c.priority = LEVEL_TO_PRIORITY[mo.influence] ?? null;
+    c.add('', MOTIVATION_LABEL[mo.kind], { boldText: true });
+    c.add('', mo.description);
+    cards.set(mo.id, c);
   }
 
   // --- Гипотезы: связки жирным, статусы — только оформлением ---
@@ -234,6 +288,7 @@ export function computeLayout(map: HypothesisMap): Layout {
   for (const t of map.tasks) {
     const c = new Card(t.id, 'task');
     c.add('', t.description, { boldText: true });
+    if (t.childMapId) c.add('', '↳ раскрыта в карту уровнем ниже', { cls: 'muted' });
     if (t.owner || t.due) {
       c.add('', `${t.owner ?? '—'}${t.due ? ` · до ${t.due}` : ''}`, { cls: 'muted' });
     }
@@ -251,127 +306,381 @@ export function computeLayout(map: HypothesisMap): Layout {
     cards.set(b.id, c);
   }
 
-  // --- порядок в колонках: приоритетные гипотезы выше, задачи — рядом со своими гипотезами ---
-  const hypothesisOrder = new Map(
-    [...map.hypotheses]
-      .sort((a, b) => LEVEL_TO_PRIORITY[a.influence] - LEVEL_TO_PRIORITY[b.influence])
-      .map((h, i) => [h.id, i]),
-  );
-  const sortedHypotheses = [...map.hypotheses].sort(
-    (a, b) =>
-      (hypothesisOrder.get(a.id) ?? 0) - (hypothesisOrder.get(b.id) ?? 0),
-  );
-  const sortedTasks = [...map.tasks].sort(
-    (a, b) =>
-      (hypothesisOrder.get(a.hypothesis) ?? 0) - (hypothesisOrder.get(b.hypothesis) ?? 0),
-  );
-
-  // --- позиции ---
-  const positions = new Map<string, { x: number; y: number }>();
-  let x = PAGE_PAD;
-  for (const column of COLUMN_ORDER) {
-    let y = PAGE_PAD;
-    let ordered: string[];
-    if (column === 'goal') {
-      // колонка целей: главная, затем 'top', затем 'sub' (со сдвигом), затем метрики
-      ordered = [
-        map.goal.id,
-        ...(map.goals ?? []).filter((g) => g.level !== 'sub').map((g) => g.id),
-        ...(map.goals ?? []).filter((g) => g.level === 'sub').map((g) => g.id),
-        ...(map.metrics ?? []).map((m) => m.id),
-      ];
-    } else if (column === 'hypothesis') {
-      ordered = sortedHypotheses.map((h) => h.id);
-    } else if (column === 'task') {
-      ordered = sortedTasks.map((t) => t.id);
-    } else {
-      ordered = [...cards.entries()].filter(([, c]) => c.kind === column).map(([id]) => id);
-    }
-    for (const id of ordered) {
-      const card = cards.get(id);
-      if (!card) continue;
-      const shift = card.subLevel ? 56 : 0; // вложенность уровня ниже
-      positions.set(id, { x: x + shift, y });
-      y += card.height + GAP_Y;
-    }
-    x += COLUMN_W[column] + (column === 'task' ? BLOCKER_GAP : COL_GAP);
-  }
-
-  // --- связи: каноническая топология «задача → гипотеза → субъект → цель» ---
+  // --- Связи (по стандарту 1.2; рендерер рисует только эти типы) ---
   interface RawEdge {
     from: string;
     to: string;
     kind: EdgeKind;
     level: Level | null;
-    fromTop?: boolean;
-    metricTopY?: number;
   }
-  // крупная задача → подцель уровнем ниже: дуга поверх доски
-  const topY =
-    Math.min(...[...cards.values()].map((c) => positions.get(c.id)!.y)) - 80;
-  // отдельные метрики → цель: линия над карточками колонки целей
-  const goalsTopY = Math.min(
-    positions.get(map.goal.id)!.y,
-    ...(map.goals ?? []).map((g) => positions.get(g.id)!.y),
-  );
-
+  const goalIdsOf = (s: typeof map.subjects[number]): string[] =>
+    s.goals && s.goals.length > 0 ? s.goals : [map.goal.id];
   const rawEdges: RawEdge[] = [
-    ...map.tasks.map((t) => ({ from: t.id, to: t.hypothesis, kind: 'flow' as const, level: null })),
+    ...map.tasks.map((t) => ({
+      from: t.id,
+      to: t.hypothesis,
+      kind: 'flow' as const,
+      level: null,
+    })),
+    // гипотеза → субъект / боль-желание / цель (бессубъектный контур)
     ...map.hypotheses.map((h) => ({
       from: h.id,
-      to: h.subject,
+      to: h.target,
       kind: 'flow' as const,
       level: h.influence,
     })),
+    // боль/желание → субъект (влияние мотивации относительно субъекта)
+    ...(map.motivations ?? []).map((mo) => ({
+      from: mo.id,
+      to: mo.subject,
+      kind: 'flow' as const,
+      level: mo.influence,
+    })),
     // субъект влияет на перечисленные цели либо на главную
     ...map.subjects.flatMap((s) =>
-      (s.goals && s.goals.length > 0 ? s.goals : [map.goal.id]).map((gid) => ({
+      goalIdsOf(s).map((gid) => ({
         from: s.id,
         to: gid,
         kind: 'flow' as const,
         level: s.influence,
       })),
     ),
-    // отдельные метрики → своя цель: дуга по левой стороне поверх целей
+    // отдельная метрика → своя цель (влияние относительно цели)
     ...(map.metrics ?? []).map((m) => ({
       from: m.id,
       to: m.goalRef,
-      kind: 'metric' as EdgeKind,
-      level: null,
-      metricTopY: goalsTopY - 45,
+      kind: 'flow' as const,
+      level: m.influence,
     })),
-    // задача → подцель уровнем ниже (многоуровневая карта): дуга поверх доски
-    ...map.tasks
-      .filter((t) => t.goalRef)
-      .map((t) => ({
-        from: t.id,
-        to: t.goalRef!,
-        kind: 'sub' as EdgeKind,
-        level: null,
-        fromTop: true,
-      })),
-    ...map.blockers.map((b) => ({ from: b.id, to: b.blocks, kind: 'block' as const, level: null })),
+    ...map.blockers.map((b) => ({
+      from: b.id,
+      to: b.blocks,
+      kind: 'block' as const,
+      level: null,
+    })),
   ];
 
-  // Все стрелки входят в правую грань карточки-цели; точки распределяем
-  // по высоте грани.
+  // ================= ПОЛОСНАЯ РАСКЛАДКА =================
+  const positions = new Map<string, { x: number; y: number }>();
+  const height = (id: string): number => cards.get(id)!.height;
+  const centerY = (id: string): number => {
+    const p = positions.get(id);
+    return p ? p.y + height(id) / 2 : PAGE_PAD;
+  };
 
-  const incomingIdx = new Map<string, number>();
-  const edges: EdgeNode[] = rawEdges.map((e) => {
-    const idx = incomingIdx.get(e.to) ?? 0;
-    incomingIdx.set(e.to, idx + 1);
-    cards.get(e.to)!.incomingRight = Math.max(cards.get(e.to)!.incomingRight, idx + 1);
-    return {
-      from: e.from,
-      to: e.to,
-      kind: e.kind,
-      level: e.level,
-      sourceHandle: 's-left',
-      targetHandle: `t-${idx}`,
-      ...(e.fromTop ? { topY } : {}),
-      ...(e.kind === 'metric' ? { metricTopY: e.metricTopY } : {}),
-    };
+  /** Разместить группы колонки сверху вниз без наложений, держась полосы.
+   *  keepOrder — не сортировать по предпочтению (порядок целей фиксирован). */
+  const placeColumn = (stacks: Stack[], keepOrder = false): void => {
+    if (stacks.length === 0) return;
+    const sorted = keepOrder
+      ? stacks
+      : [...stacks].sort((a, b) => a.preferredCenter - b.preferredCenter);
+    let prevBottom = -Infinity;
+    for (const st of sorted) {
+      const total =
+        st.ids.reduce((acc, id) => acc + height(id), 0) + (st.ids.length - 1) * INNER_GAP;
+      const top = Math.max(
+        PAGE_PAD,
+        st.preferredCenter - total / 2,
+        Number.isFinite(prevBottom) ? prevBottom + GAP_Y : PAGE_PAD,
+      );
+      let y = top;
+      for (const id of st.ids) {
+        positions.set(id, { x: 0, y });
+        y += height(id) + INNER_GAP;
+      }
+      prevBottom = top + total;
+    }
+  };
+
+  // Точки входа: входящие связи цели сортируются по Y источника,
+  // чтобы стрелки не пересекались между собой; вход — всегда правая грань.
+  const edges: EdgeNode[] = [];
+  const entryY = new Map<string, number>(); // «from→to» → Y точки входа
+  const assignEdges = (): void => {
+    edges.length = 0;
+    entryY.clear();
+    const incoming = new Map<string, RawEdge[]>();
+    for (const e of rawEdges) {
+      const list = incoming.get(e.to) ?? [];
+      list.push(e);
+      incoming.set(e.to, list);
+    }
+    for (const [to, list] of incoming) {
+      const posTo = positions.get(to);
+      if (!posTo) continue; // цель ещё не размещена (ранние итерации)
+      const sorted = [...list].sort((a, b) => centerY(a.from) - centerY(b.from));
+      cards.get(to)!.incomingRight = sorted.length;
+      sorted.forEach((e, idx) => {
+        edges.push({
+          from: e.from,
+          to: e.to,
+          kind: e.kind,
+          level: e.level,
+          sourceHandle: 's-left',
+          targetHandle: `t-${idx}`,
+        });
+        entryY.set(
+          `${e.from}→${e.to}`,
+          posTo.y + (height(to) * (idx + 1)) / (sorted.length + 1),
+        );
+      });
+    }
+  };
+
+  // 1) цели — стек в фиксированном порядке (главная первой)
+  const placeGoals = (): void =>
+    placeColumn(
+      allGoals.map((g) => ({ ids: [g.id], preferredCenter: PAGE_PAD + height(g.id) / 2 })),
+      true,
+    );
+
+  // 2) субъекты — на средних точках входа в свои цели (если известны),
+  //    иначе на центрах целей: стрелки субъект→цель почти горизонтальны
+  const placeSubjects = (): void =>
+    placeColumn(
+      map.subjects.map((s) => {
+        const anchors = goalIdsOf(s)
+          .filter((gid) => cards.has(gid))
+          .map((gid) => entryY.get(`${s.id}→${gid}`) ?? centerY(gid));
+        return {
+          ids: [s.id],
+          preferredCenter: anchors.length ? average(anchors) : PAGE_PAD,
+        };
+      }),
+    );
+
+  // 3) метрики — каждая на своей точке входа в цель (стрелка горизонтальна),
+  //    в свободные промежутки между коридорами стрелок субъект→цель.
+  //    Коридор в зоне колонки метрик считаем по кривизне безье: у грани цели
+  //    кривая уже почти горизонтальна, полный корпус концов был бы излишним.
+  const metricOf = new Map<string, string[]>();
+  for (const m of map.metrics ?? []) {
+    const list = metricOf.get(m.goalRef) ?? [];
+    list.push(m.id);
+    metricOf.set(m.goalRef, list);
+  }
+  /** Геометрия колонок по X (уточняется каждую итерацию). */
+  interface ColGeom {
+    goalRight: number;
+    metricLeft: number;
+    metricRight: number;
+    subjectLeft: number;
+  }
+  let geom: ColGeom = {
+    goalRight: PAGE_PAD + COLUMN_W.goal,
+    metricLeft: PAGE_PAD + COLUMN_W.goal + OWNER_GAP,
+    metricRight: PAGE_PAD + COLUMN_W.goal + OWNER_GAP + COLUMN_W.metric,
+    subjectLeft: PAGE_PAD + COLUMN_W.goal + OWNER_GAP + COLUMN_W.metric + COL_GAP,
+  };
+  const placeMetrics = (): void => {
+    const occupied: Array<[number, number]> = [];
+    const D = geom.subjectLeft - geom.goalRight;
+    const tNear = Math.max(0, 1 - (geom.metricLeft - geom.goalRight) / D);
+    const tFar = Math.max(0, 1 - (geom.metricRight - geom.goalRight) / D);
+    // коридоры всех стрелок субъект→цель: каждая из них пересекает колонку метрик
+    const corridors: Array<[number, number]> = [];
+    for (const g of allGoals) {
+      const goalPos = positions.get(g.id);
+      if (!goalPos) continue;
+      const sources = map.subjects
+        .filter((s) => goalIdsOf(s).includes(g.id))
+        .sort((a, b) => centerY(a.id) - centerY(b.id));
+      sources.forEach((s, i) => {
+        const srcY = centerY(s.id);
+        const known = entryY.get(`${s.id}→${g.id}`);
+        const entry = known ?? goalPos.y + (height(g.id) * (i + 1)) / (sources.length + 1);
+        const yNear = srcY + (entry - srcY) * smoothstep(tNear);
+        const yFar = srcY + (entry - srcY) * smoothstep(tFar);
+        corridors.push([Math.min(yNear, yFar) - 40, Math.max(yNear, yFar) + 40]);
+      });
+    }
+    for (const g of allGoals) {
+      const ids = metricOf.get(g.id) ?? [];
+      if (ids.length === 0) continue;
+      const spread = (ids.length - 1) / 2;
+      ids.forEach((id, k) => {
+        const anchor =
+          entryY.get(`${id}→${g.id}`) ??
+          centerY(g.id) + (k - spread) * (height(id) + INNER_GAP);
+        const top = freeTop(anchor - height(id) / 2, height(id), [...corridors, ...occupied]);
+        positions.set(id, { x: 0, y: top });
+        occupied.push([top, top + height(id)]);
+      });
+    }
+    // разведение наложений внутри колонки метрик
+    const sorted = (map.metrics ?? [])
+      .map((m) => m.id)
+      .map((id) => ({ id, y: positions.get(id)!.y }))
+      .sort((a, b) => a.y - b.y);
+    let prevBottom = -Infinity;
+    for (const { id, y } of sorted) {
+      const top = Math.max(y, Number.isFinite(prevBottom) ? prevBottom + INNER_GAP : y);
+      positions.set(id, { x: 0, y: top });
+      prevBottom = top + height(id);
+    }
+  };
+
+  // X колонок: базовые зазоры, затем адаптивное расширение — зазоры
+  // растягиваются, пока каждую стрелку нельзя уложить в порог пологости
+  // (|Δy| ≤ SLOPE_MAX · Δx): вертикальных участков у стрелок не бывает
+  const present = COLUMN_ORDER.filter((c) => [...cards.values()].some((k) => k.kind === c));
+  const colOf = new Map<string, number>();
+  present.forEach((c, i) => {
+    for (const card of cards.values()) if (card.kind === c) colOf.set(card.id, i);
   });
+  const computeX = (): void => {
+    const gaps = present.slice(0, -1).map((c) => COLUMN_GAP_AFTER[c] ?? COL_GAP);
+    const spanDx = (from: number, to: number): number => {
+      // от правой грани колонки to до левой грани колонки from
+      let sum = 0;
+      for (let i = to; i < from; i++) sum += gaps[i]!;
+      for (let i = to + 1; i < from; i++) sum += COLUMN_W[present[i]!];
+      return sum;
+    };
+    for (let pass = 0; pass < 3; pass++) {
+      for (const e of edges) {
+        if (!positions.has(e.from) || !positions.has(e.to)) continue;
+        const si = colOf.get(e.from)!;
+        const ti = colOf.get(e.to)!;
+        if (si <= ti) continue;
+        const dy = Math.abs(centerY(e.from) - (entryY.get(`${e.from}→${e.to}`) ?? centerY(e.to)));
+        const need = dy / SLOPE_MAX;
+        const have = spanDx(si, ti);
+        if (need > have) {
+          const deficit = need - have;
+          const spanned = si - ti;
+          for (let i = ti; i < si; i++) gaps[i]! += deficit / spanned;
+        }
+      }
+    }
+    let x = PAGE_PAD;
+    const colX = new Map<CardKind, number>();
+    present.forEach((column, i) => {
+      colX.set(column, x);
+      if (i < present.length - 1) x += COLUMN_W[column] + gaps[i]!;
+    });
+    for (const card of cards.values()) {
+      const p = positions.get(card.id);
+      if (!p) continue; // колонка ещё не размещена (ранние итерации)
+      positions.set(card.id, { x: colX.get(card.kind)!, y: p.y });
+    }
+    geom = {
+      goalRight: colX.get('goal')! + COLUMN_W.goal,
+      metricLeft: colX.get('metric') ?? 0,
+      metricRight: (colX.get('metric') ?? 0) + COLUMN_W.metric,
+      subjectLeft: colX.get('subject') ?? 0,
+    };
+  };
+
+  // --- Главная петля сходимости: Y-позиции ↔ точки входа ↔ ширины колонок ---
+  placeGoals();
+  placeSubjects();
+  placeMetrics();
+  for (let i = 0; i < 4; i++) {
+    assignEdges();
+    // цель растягивается до самого нижнего источника (субъект или метрика),
+    // чтобы равномерные точки входа разошлись по полосам источников
+    for (const g of allGoals) {
+      const sourceIds = [
+        ...map.subjects.filter((s) => goalIdsOf(s).includes(g.id)).map((s) => s.id),
+        ...(metricOf.get(g.id) ?? []),
+      ];
+      const bottoms = sourceIds.map((id) => {
+        const p = positions.get(id);
+        return p ? p.y + height(id) : 0;
+      });
+      const maxBottom = bottoms.length ? Math.max(...bottoms) : 0;
+      const goalTop = positions.get(g.id)!.y;
+      cards.get(g.id)!.minHeight = Math.min(
+        1800,
+        Math.max(MIN_H.goal ?? 0, maxBottom - goalTop + 2 * PAD),
+      );
+    }
+    placeGoals();
+    placeSubjects();
+    placeMetrics();
+    computeX();
+  }
+  assignEdges();
+
+  // 4) боли/желания — на полосе своего субъекта
+  placeColumn(
+    map.subjects
+      .map((s) => {
+        const ids = (map.motivations ?? []).filter((mo) => mo.subject === s.id).map((mo) => mo.id);
+        return ids.length ? { ids, preferredCenter: centerY(s.id) } : null;
+      })
+      .filter((st): st is Stack => st !== null),
+  );
+
+  // 5) гипотезы — группами на полосе своей цели воздействия
+  const hypGroups = new Map<string, string[]>();
+  for (const h of map.hypotheses) {
+    const list = hypGroups.get(h.target) ?? [];
+    list.push(h.id);
+    hypGroups.set(h.target, list);
+  }
+  placeColumn(
+    [...hypGroups.entries()].map(([target, ids]) => ({
+      ids: sortIdsByPriority(ids, map),
+      preferredCenter: centerY(target),
+    })),
+  );
+
+  // 5b) релаксация мотиваций: карточка мотивации смещается на середину между
+  //     субъектом и своими гипотезами — обе стрелки делаются положе
+  placeColumn(
+    map.subjects
+      .map((s) => {
+        const mos = (map.motivations ?? []).filter((mo) => mo.subject === s.id);
+        if (mos.length === 0) return null;
+        const preferred = mos.map((mo) => {
+          const hyps = hypGroups.get(mo.id) ?? [];
+          const anchor = hyps.length
+            ? average(hyps.map((h) => centerY(h)))
+            : centerY(s.id);
+          return (anchor + centerY(s.id)) / 2;
+        });
+        return { ids: mos.map((mo) => mo.id), preferredCenter: average(preferred) };
+      })
+      .filter((st): st is Stack => st !== null),
+  );
+
+  // 6) задачи — на полосе своей гипотезы
+  {
+    const groups = new Map<string, string[]>();
+    for (const t of map.tasks) {
+      const list = groups.get(t.hypothesis) ?? [];
+      list.push(t.id);
+      groups.set(t.hypothesis, list);
+    }
+    placeColumn(
+      [...groups.entries()].map(([hyp, ids]) => ({
+        ids,
+        preferredCenter: centerY(hyp),
+      })),
+    );
+  }
+
+  // 7) блокеры — на полосе блокируемой задачи
+  {
+    const groups = new Map<string, string[]>();
+    for (const b of map.blockers) {
+      const list = groups.get(b.blocks) ?? [];
+      list.push(b.id);
+      groups.set(b.blocks, list);
+    }
+    placeColumn(
+      [...groups.entries()].map(([task, ids]) => ({
+        ids,
+        preferredCenter: centerY(task),
+      })),
+    );
+  }
+
+  assignEdges();
+  computeX();
 
   const nodes: CardNode[] = [...cards.entries()].map(([id, card]) => {
     const pos = positions.get(id)!;
@@ -386,9 +695,29 @@ export function computeLayout(map: HypothesisMap): Layout {
       priority: card.priority,
       cost: card.cost,
       incomingRight: card.incomingRight,
+      fill: card.fill,
       extraStyle: card.extraStyle,
     };
   });
 
   return { cards: nodes, edges };
+}
+
+/** Приоритетные гипотезы — выше в своей группе. */
+function sortIdsByPriority(ids: string[], map: HypothesisMap): string[] {
+  const prio = new Map(map.hypotheses.map((h) => [h.id, LEVEL_TO_PRIORITY[h.influence]]));
+  return [...ids].sort((a, b) => (prio.get(a) ?? 9) - (prio.get(b) ?? 9));
+}
+
+/** Ближайший свободный отрезок [top, top+h] вне запретных коридоров. */
+function freeTop(idealTop: number, h: number, corridors: Array<[number, number]>): number {
+  if (corridors.length === 0) return Math.max(PAGE_PAD, idealTop);
+  const hits = (top: number): boolean =>
+    corridors.some(([lo, hi]) => top < hi && lo < top + h) || top < PAGE_PAD;
+  for (let d = 0; d <= 2400; d += 20) {
+    for (const top of d === 0 ? [idealTop] : [idealTop - d, idealTop + d]) {
+      if (!hits(top)) return top;
+    }
+  }
+  return Math.max(PAGE_PAD, idealTop);
 }

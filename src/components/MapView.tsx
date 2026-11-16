@@ -12,18 +12,17 @@ import '@xyflow/react/dist/style.css';
 import type { HypothesisMap } from '../types';
 import { ARROW_STYLE, computeLayout } from '../model/layout';
 import { CardView, type StickyNodeData } from './CardView';
-import { SubgoalEdge } from './SubgoalEdge';
-import { MetricGoalEdge } from './MetricGoalEdge';
+import { FlowEdge } from './FlowEdge';
 
 interface Props {
   map: HypothesisMap;
 }
 
 const nodeTypes = { sticky: CardView };
-const edgeTypes = { subgoal: SubgoalEdge, metric: MetricGoalEdge };
+const edgeTypes = { flow: FlowEdge };
 
-/** Доска на React Flow: карточки-узлы, стрелки с цельными наконечниками,
- * точечный фон, зум и панорамирование из коробки. Без анимаций. */
+/** Доска на React Flow: карточки-узлы и строго горизонтальные стрелки
+ * (плавные кривые справа налево, вход в правую грань). Без анимаций. */
 export function MapView({ map }: Props) {
   const { nodes, edges } = useMemo(() => {
     const layout = computeLayout(map);
@@ -40,12 +39,9 @@ export function MapView({ map }: Props) {
     }));
     const rfEdges: Edge[] = layout.edges.map((e, i) => {
       const key = e.level ?? 'none';
-      // задача→подцель (уровень ниже) — смысловая связь: тёмно-зелёная, заметная
-      const isSub = e.kind === 'sub';
-      const isMetric = e.kind === 'metric';
-      const color =
-        e.kind === 'block' ? '#cc7c7c' : isSub ? '#93ab4a' : ARROW_STYLE[key]!.color;
-      const width = isSub ? 3 : ARROW_STYLE[key]!.width;
+      const isBlock = e.kind === 'block';
+      const color = isBlock ? '#cc7c7c' : ARROW_STYLE[key]!.color;
+      const width = isBlock ? 2 : ARROW_STYLE[key]!.width;
       const markerSize = Math.round(8 + width * 3);
       return {
         id: `e-${i}`,
@@ -53,9 +49,7 @@ export function MapView({ map }: Props) {
         target: e.to,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
-        type: isSub ? 'subgoal' : isMetric ? 'metric' : 'default',
-        ...(isSub ? { data: { topY: e.topY } } : {}),
-        ...(isMetric ? { data: { metricTopY: e.metricTopY } } : {}),
+        type: 'flow',
         style: { stroke: color, strokeWidth: width },
         markerEnd: {
           type: MarkerType.ArrowClosed,

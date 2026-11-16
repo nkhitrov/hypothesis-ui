@@ -38,7 +38,7 @@ export function CardView({ data }: NodeProps<StickyNode>) {
       style={{
         width: '100%',
         minHeight: '100%',
-        background: palette.fill,
+        background: node.fill ?? palette.fill,
         ...(node.extraStyle ? styleFromExtra(node.extraStyle) : null),
       }}
     >

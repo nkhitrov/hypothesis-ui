@@ -21,6 +21,7 @@ import {
   type MapFormat,
 } from './model/io';
 import { validateMap } from './model/validate';
+import { InvalidMapScreen } from './components/InvalidMapScreen';
 import { MapView } from './components/MapView';
 import { Sidebar } from './components/Sidebar';
 import { TextEditor } from './components/TextEditor';
@@ -42,6 +43,9 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const index = useMemo(() => loadIndex(), [indexTick]);
+
+  /** Валидная карта — условие рендера: при ошибках доска не отрисовывается. */
+  const validationErrors = useMemo(() => validateMap(map), [map]);
 
   const notify = (message: string): void => {
     setFlash(message);
@@ -236,7 +240,15 @@ export default function App() {
           />
         )}
         {view === 'board' ? (
-          <MapView map={map} />
+          validationErrors.length > 0 ? (
+            <InvalidMapScreen
+              errors={validationErrors}
+              onFix={() => setView('editor')}
+              onOpenList={() => setSidebarOpen(true)}
+            />
+          ) : (
+            <MapView map={map} />
+          )
         ) : (
           <TextEditor
             map={map}
