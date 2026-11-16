@@ -40,10 +40,10 @@ export function validateMap(input: unknown): string[] {
     return errors;
   }
 
-  const metricList = Array.isArray(goal.metrics)
-    ? (goal.metrics as unknown as Entity[])
-    : [];
   const extraGoals = Array.isArray(map.goals) ? (map.goals as unknown as Entity[]) : [];
+  const metricList = [goal, ...extraGoals].flatMap((g) =>
+    Array.isArray(g['metrics']) ? (g['metrics'] as unknown as Entity[]) : [],
+  );
   const separatedMetrics = Array.isArray(map.metrics)
     ? (map.metrics as unknown as Entity[])
     : [];

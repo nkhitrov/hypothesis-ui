@@ -446,9 +446,223 @@ const SMENNSY_LEVEL2_MAP: HypothesisMap = {
   blockers: [],
 };
 
+/** Несколько несвязанных целей — учебные примеры скилла hypothesis-mapping
+ *  (references/examples.md №4, №5, №6), дословно: субъектный контур (текучесть)
+ *  и два бессубъектных контура (дата-центр, автоматизация заказов). */
+const MULTI_GOALS_MAP: HypothesisMap = {
+  schemaVersion: 1,
+  meta: {
+    title: 'Демо: Несколько несвязанных целей (учебные примеры скилла)',
+    version: 1,
+    date: '2026-11-16',
+  },
+  goal: {
+    id: 'goal-turnover',
+    description: 'Снизить добровольную текучесть специалистов первого года работы',
+    metrics: [
+      {
+        id: 'metric-turnover',
+        description: 'Добровольная текучесть специалистов первого года',
+        current: '18% в год',
+        target: '12% в год',
+      },
+      {
+        id: 'metric-hr-costs',
+        description: 'Затраты на персонал',
+        current: 'в установленном диапазоне',
+        target: 'в том же диапазоне',
+        balancing: true,
+      },
+    ],
+  },
+  goals: [
+    {
+      id: 'goal-dc',
+      description: 'Снизить энергопотребление дата-центра без ухудшения доступности',
+      metrics: [
+        {
+          id: 'metric-energy',
+          description: 'Энергопотребление',
+          current: 'базовый уровень',
+          target: '−10%',
+        },
+        {
+          id: 'metric-availability',
+          description: 'Доступность',
+          current: '99,99%',
+          target: 'не ниже 99,99%',
+          balancing: true,
+        },
+      ],
+    },
+    {
+      id: 'goal-margin',
+      description: 'Увеличить маржу обработки заказов при сохранении качества обслуживания',
+      metrics: [
+        {
+          id: 'metric-margin',
+          description: 'Маржа обработки заказов',
+          current: 'ниже желаемой',
+          target: 'желаемое значение',
+        },
+        {
+          id: 'metric-quality',
+          description: 'Качество обслуживания',
+          current: 'целевой уровень',
+          target: 'не ниже целевого',
+          balancing: true,
+        },
+      ],
+    },
+  ],
+  subjects: [
+    {
+      id: 'subject-junior',
+      description: 'Специалисты первого года работы',
+      influence: 'high',
+      goals: ['goal-turnover'],
+      pains: [
+        'Поздно понимают критерии профессионального роста',
+        'Считают решения о повышении непрозрачными',
+      ],
+    },
+  ],
+  hypotheses: [
+    {
+      id: 'hyp-growth',
+      target: 'subject-junior',
+      metrics: ['metric-turnover', 'metric-hr-costs'],
+      influence: 'high',
+      cost: 'medium',
+      status: 'draft',
+      if: 'сделать критерии профессионального роста наблюдаемыми и регулярно обсуждать прогресс без привязки к личным отношениям с руководителем',
+      then: 'специалисты первого года будут раньше видеть реалистичный путь роста и реже искать новую работу из-за ощущения тупика',
+      because: 'для них важны предсказуемость развития и ощущение справедливой оценки',
+      so: 'добровольная текучесть этой группы снизится с 18% до 12% в год при сохранении затрат на персонал в установленном диапазоне',
+    },
+    {
+      id: 'hyp-freecooling',
+      target: 'goal-dc',
+      metrics: ['metric-energy', 'metric-availability'],
+      influence: 'medium',
+      cost: 'low',
+      status: 'draft',
+      if: 'увеличить долю свободного охлаждения в допустимом температурном диапазоне',
+      then: 'компрессоры будут работать меньше часов',
+      because: 'наружный воздух сможет отводить требуемое количество тепла без работы компрессорного контура',
+      so: 'энергопотребление снизится на 10%, а доступность останется не ниже 99,99%',
+    },
+    {
+      id: 'hyp-autocheck',
+      target: 'goal-margin',
+      metrics: ['metric-margin', 'metric-quality'],
+      influence: 'medium',
+      cost: 'medium',
+      status: 'draft',
+      if: 'встроить автоматическую проверку полноты и непротиворечивости данных до подтверждения заказа',
+      then: 'доля заказов с ошибками ввода снизится',
+      because: 'алгоритм выявит пропуски и противоречия до перехода заказа на следующий этап',
+      so: 'затраты на исправление ошибок снизятся, а маржа вырастет до желаемого значения при сохранении целевого уровня качества',
+    },
+  ],
+  tasks: [
+    {
+      id: 'task-check-motivation',
+      hypothesis: 'hyp-growth',
+      description: 'Проверить данные о мотивации и причинную связь до принятия ставки',
+    },
+  ],
+  blockers: [],
+};
+
+/** Метрики цели на отдельном уровне — учебный пример личной стратегии из
+ *  базы знаний (metricdesign.md): субъективная шкала, объективная метрика
+ *  и балансирующая граница вынесены карточками справа от цели. */
+const METRICS_LEVEL_MAP: HypothesisMap = {
+  schemaVersion: 1,
+  meta: {
+    title: 'Демо: Метрики цели на отдельном уровне (учебный пример базы знаний)',
+    horizon: 'восемь недель',
+    version: 1,
+    date: '2026-11-16',
+  },
+  goal: {
+    id: 'goal-freedom',
+    description: 'Увеличить удовлетворённость свободой распоряжаться своим временем',
+    metrics: [],
+  },
+  metrics: [
+    {
+      id: 'metric-fs-scale',
+      description: 'Удовлетворённость свободой времени (моя шкала 1–10)',
+      current: '4',
+      target: '7',
+      goalRef: 'goal-freedom',
+      influence: 'high',
+    },
+    {
+      id: 'metric-fs-evenings',
+      description: 'Вечера в неделю с ≥1 свободным часом после обязательств',
+      current: '0',
+      target: '2',
+      goalRef: 'goal-freedom',
+      influence: 'medium',
+    },
+    {
+      id: 'metric-fs-sleep',
+      description: 'Сон (балансирующая граница)',
+      current: '—',
+      target: '≥ 7 часов/сутки',
+      balancing: true,
+      goalRef: 'goal-freedom',
+      influence: 'medium',
+    },
+  ],
+  subjects: [
+    {
+      id: 'subject-me-evenings',
+      description: 'Я в будние вечера',
+      influence: 'high',
+      wishes: [
+        'Самостоятельно распоряжаться частью своей жизни, не ждать внезапного свободного окна',
+      ],
+    },
+  ],
+  hypotheses: [
+    {
+      id: 'hyp-predictability',
+      target: 'subject-me-evenings',
+      metrics: ['metric-fs-scale', 'metric-fs-evenings', 'metric-fs-sleep'],
+      influence: 'medium',
+      cost: 'low',
+      status: 'to-verify',
+      if: 'повысить предсказуемость доступного мне свободного времени',
+      then: 'я буду чаще выбирать занятия по собственному желанию',
+      because: 'для меня важно самостоятельно распоряжаться частью своей жизни и не ждать внезапного свободного окна',
+      so: 'удовлетворённость свободой времени вырастет с 4 до 7 по моей шкале',
+    },
+  ],
+  tasks: [
+    {
+      id: 'task-lower-map',
+      hypothesis: 'hyp-predictability',
+      description: 'Построить нижнюю карту с целью обеспечить предсказуемые свободные периоды',
+    },
+    {
+      id: 'task-weekly-score',
+      hypothesis: 'hyp-predictability',
+      description:
+        'Оценивать удовлетворённость раз в неделю; первое решение о продолжении — через 8 недель',
+    },
+  ],
+  blockers: [],
+};
+
 /** Демо-карты первого запуска; основная — «Гончар» (пример из базы знаний). */
 export const DEMO_MAPS: Array<{ id: string; map: HypothesisMap }> = [
   { id: 'demo-gonchar', map: GONCHAR_MAP },
   { id: 'demo-smennsy-pro', map: SMENNSY_MAP },
   { id: 'demo-smennsy-level2', map: SMENNSY_LEVEL2_MAP },
+  { id: 'demo-multi-goals', map: MULTI_GOALS_MAP },
+  { id: 'demo-metrics-level', map: METRICS_LEVEL_MAP },
 ];
