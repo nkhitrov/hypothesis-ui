@@ -155,8 +155,6 @@ class Card {
   fill?: string;
   extraStyle?: string;
   incomingRight = 0;
-  /** Динамическая минимальная высота (цель растягивается под точки входа). */
-  minHeight = 0;
 
   constructor(
     readonly id: string,
@@ -169,9 +167,10 @@ class Card {
   get pad(): number {
     return this.kind === 'task' ? TASK_PAD : PAD;
   }
+  /** Высота — строго по содержимому (описание + строки), как в стандарте. */
   get height(): number {
     const h = 2 * this.pad + this.lineCount * LINE_H + (this.rows.length - 1) * 4;
-    return Math.max(MIN_H[this.kind] ?? 0, h, this.minHeight);
+    return Math.max(MIN_H[this.kind] ?? 0, h);
   }
 
   add(label: string, text: string, opts: { boldText?: boolean; cls?: string } = {}): void {
@@ -336,15 +335,17 @@ export function computeLayout(map: HypothesisMap): Layout {
       kind: 'flow' as const,
       level: mo.influence,
     })),
-    // субъект влияет на перечисленные цели либо на главную
-    ...map.subjects.flatMap((s) =>
-      goalIdsOf(s).map((gid) => ({
+    // субъект влияет на вынесенные метрики своей цели (топология «метрики
+    // на отдельном уровне») либо — классически — на саму цель
+    ...map.subjects.flatMap((s) => {
+      const targets = s.metrics && s.metrics.length > 0 ? s.metrics : goalIdsOf(s);
+      return targets.map((tid) => ({
         from: s.id,
-        to: gid,
+        to: tid,
         kind: 'flow' as const,
         level: s.influence,
-      })),
-    ),
+      }));
+    }),
     // отдельная метрика → своя цель (влияние относительно цели)
     ...(map.metrics ?? []).map((m) => ({
       from: m.id,
@@ -435,14 +436,16 @@ export function computeLayout(map: HypothesisMap): Layout {
       true,
     );
 
-  // 2) субъекты — на средних точках входа в свои цели (если известны),
-  //    иначе на центрах целей: стрелки субъект→цель почти горизонтальны
+  // 2) субъекты — на средних точках входа в свои цели воздействия (метрики
+  //    или цель, если известны), иначе на центрах: стрелки почти горизонтальны
   const placeSubjects = (): void =>
     placeColumn(
       map.subjects.map((s) => {
-        const anchors = goalIdsOf(s)
-          .filter((gid) => cards.has(gid))
-          .map((gid) => entryY.get(`${s.id}→${gid}`) ?? centerY(gid));
+        const targets = (s.metrics && s.metrics.length > 0 ? s.metrics : goalIdsOf(s))
+          .filter((tid) => cards.has(tid));
+        const anchors = targets.map(
+          (tid) => entryY.get(`${s.id}→${tid}`) ?? centerY(tid),
+        );
         return {
           ids: [s.id],
           preferredCenter: anchors.length ? average(anchors) : PAGE_PAD,
@@ -478,22 +481,18 @@ export function computeLayout(map: HypothesisMap): Layout {
     const D = geom.subjectLeft - geom.goalRight;
     const tNear = Math.max(0, 1 - (geom.metricLeft - geom.goalRight) / D);
     const tFar = Math.max(0, 1 - (geom.metricRight - geom.goalRight) / D);
-    // коридоры всех стрелок субъект→цель: каждая из них пересекает колонку метрик
+    // коридоры стрелок, пересекающих колонку метрик: это связи, чья цель —
+    // карточка цели (субъект→цель в классике, бессубъектная гипотеза→цель);
+    // связи субъект→метрика заканчиваются у грани метрики и колонку не режут
     const corridors: Array<[number, number]> = [];
-    for (const g of allGoals) {
-      const goalPos = positions.get(g.id);
-      if (!goalPos) continue;
-      const sources = map.subjects
-        .filter((s) => goalIdsOf(s).includes(g.id))
-        .sort((a, b) => centerY(a.id) - centerY(b.id));
-      sources.forEach((s, i) => {
-        const srcY = centerY(s.id);
-        const known = entryY.get(`${s.id}→${g.id}`);
-        const entry = known ?? goalPos.y + (height(g.id) * (i + 1)) / (sources.length + 1);
-        const yNear = srcY + (entry - srcY) * smoothstep(tNear);
-        const yFar = srcY + (entry - srcY) * smoothstep(tFar);
-        corridors.push([Math.min(yNear, yFar) - 40, Math.max(yNear, yFar) + 40]);
-      });
+    const goalIdsSet = new Set(allGoals.map((g) => g.id));
+    for (const e of rawEdges) {
+      if (!goalIdsSet.has(e.to)) continue;
+      const srcY = centerY(e.from);
+      const entry = entryY.get(`${e.from}→${e.to}`) ?? centerY(e.to);
+      const yNear = srcY + (entry - srcY) * smoothstep(tNear);
+      const yFar = srcY + (entry - srcY) * smoothstep(tFar);
+      corridors.push([Math.min(yNear, yFar) - 40, Math.max(yNear, yFar) + 40]);
     }
     for (const g of allGoals) {
       const ids = metricOf.get(g.id) ?? [];
@@ -574,29 +573,14 @@ export function computeLayout(map: HypothesisMap): Layout {
   };
 
   // --- Главная петля сходимости: Y-позиции ↔ точки входа ↔ ширины колонок ---
+  // Размер карточки цели жёсткий — по содержимому (описание + метрики),
+  // под стрелки она НЕ подстраивается; пологость обеспечивают якоря
+  // «источник на своей точке входа» и адаптивные зазоры колонок.
   placeGoals();
   placeSubjects();
   placeMetrics();
   for (let i = 0; i < 4; i++) {
     assignEdges();
-    // цель растягивается до самого нижнего источника (субъект или метрика),
-    // чтобы равномерные точки входа разошлись по полосам источников
-    for (const g of allGoals) {
-      const sourceIds = [
-        ...map.subjects.filter((s) => goalIdsOf(s).includes(g.id)).map((s) => s.id),
-        ...(metricOf.get(g.id) ?? []),
-      ];
-      const bottoms = sourceIds.map((id) => {
-        const p = positions.get(id);
-        return p ? p.y + height(id) : 0;
-      });
-      const maxBottom = bottoms.length ? Math.max(...bottoms) : 0;
-      const goalTop = positions.get(g.id)!.y;
-      cards.get(g.id)!.minHeight = Math.min(
-        1800,
-        Math.max(MIN_H.goal ?? 0, maxBottom - goalTop + 2 * PAD),
-      );
-    }
     placeGoals();
     placeSubjects();
     placeMetrics();

@@ -226,6 +226,7 @@ const SMENNSY_MAP: HypothesisMap = {
       description: 'Начальники смен производств',
       influence: 'high',
       goals: ['goal-mrr', 'goal-market'],
+      metrics: ['metric-conversion', 'metric-share'],
     },
     {
       id: 'subject-hr',
@@ -233,6 +234,7 @@ const SMENNSY_MAP: HypothesisMap = {
       influence: 'medium',
       negative: true,
       goals: ['goal-mrr'],
+      metrics: ['metric-conversion'],
     },
     {
       id: 'subject-it',
@@ -240,6 +242,7 @@ const SMENNSY_MAP: HypothesisMap = {
       influence: 'medium',
       negative: true,
       goals: ['goal-mrr'],
+      metrics: ['metric-nps'],
     },
   ],
   motivations: [
@@ -626,6 +629,7 @@ const METRICS_LEVEL_MAP: HypothesisMap = {
       wishes: [
         'Самостоятельно распоряжаться частью своей жизни, не ждать внезапного свободного окна',
       ],
+      metrics: ['metric-fs-scale', 'metric-fs-evenings'],
     },
   ],
   hypotheses: [

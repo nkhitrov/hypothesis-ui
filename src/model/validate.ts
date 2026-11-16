@@ -143,6 +143,7 @@ export function validateMap(input: unknown): string[] {
   }
 
   // --- субъекты ---
+  const mainGoalId = isStr(goal['id']) ? goal['id'] : '';
   for (const s of subjects) {
     const sid = isStr(s['id']) ? s['id'] : '?';
     if (!LEVELS.includes(s['influence'] as Level)) {
@@ -151,10 +152,36 @@ export function validateMap(input: unknown): string[] {
       );
     }
     const goalRefs = s['goals'];
+    let goalIds: string[] = [mainGoalId];
     if (goalRefs !== undefined && !isStrArray(goalRefs)) {
       errors.push(`субъект '${sid}': 'goals' должен быть списком id целей`);
     } else if (isStrArray(goalRefs)) {
+      goalIds = goalRefs;
       for (const gid of goalRefs) link(gid, `субъект '${sid}' (цель)`, ['цель']);
+    }
+    const metricRefs = s['metrics'];
+    if (metricRefs !== undefined && !isStrArray(metricRefs)) {
+      errors.push(`субъект '${sid}': 'metrics' должен быть списком id метрик`);
+    } else if (isStrArray(metricRefs)) {
+      for (const mid of metricRefs) link(mid, `субъект '${sid}' (метрика)`, ['метрика']);
+    }
+    // цель с вынесенными метриками не обходится: субъект обязан влиять
+    // хотя бы на одну метрику такой цели, а не на саму цель
+    for (const gid of goalIds) {
+      if (gid === '') continue;
+      const goalMetrics = separatedMetrics
+        .filter((m) => m['goalRef'] === gid)
+        .map((m) => (isStr(m['id']) ? m['id'] : ''))
+        .filter(Boolean);
+      if (goalMetrics.length === 0) continue;
+      const attached = isStrArray(metricRefs)
+        ? metricRefs.filter((mid) => goalMetrics.includes(mid))
+        : [];
+      if (attached.length === 0) {
+        errors.push(
+          `субъект '${sid}': цель '${gid}' имеет вынесенные метрики (${goalMetrics.join(', ')}) — привяжите субъект к метрикам (subject.metrics), а не к цели`,
+        );
+      }
     }
   }
 
