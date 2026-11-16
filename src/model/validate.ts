@@ -1,12 +1,16 @@
-import type { HypothesisMap, Level, HypothesisStatus } from '../types';
+import type { HypothesisMap, Level, HypothesisStatus, MotivationKind } from '../types';
 
 /**
- * Правила целостности карты (см. openspec/changes/add-web-app/specs/map-validation).
+ * Правила целостности карты по стандарту 1.2 (см. docs/knowledge-base и
+ * openspec/changes/add-web-app/specs/map-validation).
+ * Топология: Задача → Гипотеза → (Субъект | Боль/Желание → Субъект | Цель-бессубъектно),
+ * Субъект → Цель, Метрика → Цель, Блокер → Задача. Иные связи запрещены.
  * Возвращает список всех нарушений сразу; пустой список — карта валидна.
  */
 
 const LEVELS: readonly Level[] = ['low', 'medium', 'high'];
 const STATUSES: readonly HypothesisStatus[] = ['draft', 'to-verify', 'confirmed', 'refuted'];
+const MOTIVATION_KINDS: readonly MotivationKind[] = ['pain', 'wish'];
 
 const PART_NAMES: Record<'if' | 'then' | 'because' | 'so', string> = {
   if: 'Если',
@@ -16,6 +20,8 @@ const PART_NAMES: Record<'if' | 'then' | 'because' | 'so', string> = {
 };
 
 type Entity = Record<string, unknown>;
+/** Тип сущности по id — для проверки, что ссылка ведёт на допустимый тип. */
+type Kind = 'цель' | 'метрика' | 'субъект' | 'мотивация' | 'гипотеза' | 'задача' | 'блокер';
 
 const isObj = (v: unknown): v is Entity => typeof v === 'object' && v !== null;
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -34,10 +40,16 @@ export function validateMap(input: unknown): string[] {
     return errors;
   }
 
-  const metrics = isObj(goal.metrics) || Array.isArray(goal.metrics) ? goal.metrics : [];
-  const metricList = Array.isArray(metrics) ? (metrics as unknown as Entity[]) : [];
-  const subjects = Array.isArray(map.subjects)
-    ? (map.subjects as unknown as Entity[])
+  const metricList = Array.isArray(goal.metrics)
+    ? (goal.metrics as unknown as Entity[])
+    : [];
+  const extraGoals = Array.isArray(map.goals) ? (map.goals as unknown as Entity[]) : [];
+  const separatedMetrics = Array.isArray(map.metrics)
+    ? (map.metrics as unknown as Entity[])
+    : [];
+  const subjects = Array.isArray(map.subjects) ? (map.subjects as unknown as Entity[]) : [];
+  const motivations = Array.isArray(map.motivations)
+    ? (map.motivations as unknown as Entity[])
     : [];
   const hypotheses = Array.isArray(map.hypotheses)
     ? (map.hypotheses as unknown as Entity[])
@@ -45,9 +57,9 @@ export function validateMap(input: unknown): string[] {
   const tasks = Array.isArray(map.tasks) ? (map.tasks as unknown as Entity[]) : [];
   const blockers = Array.isArray(map.blockers) ? (map.blockers as unknown as Entity[]) : [];
 
-  // --- уникальность id ---
-  const seen = new Map<string, string>();
-  const checkUnique = (kind: string, items: Entity[]): void => {
+  // --- уникальность и типизация id ---
+  const seen = new Map<string, Kind>();
+  const checkUnique = (kind: Kind, items: Entity[]): void => {
     for (const item of items) {
       const id = item['id'];
       if (!isStr(id) || id === '') {
@@ -63,34 +75,57 @@ export function validateMap(input: unknown): string[] {
     }
   };
   checkUnique('цель', [goal]);
-  const extraGoals = Array.isArray(map.goals) ? (map.goals as unknown as Entity[]) : [];
   checkUnique('цель', extraGoals);
-  const separatedMetrics = Array.isArray(map.metrics)
-    ? (map.metrics as unknown as Entity[])
-    : [];
   checkUnique('метрика', metricList);
   checkUnique('метрика', separatedMetrics);
   checkUnique('субъект', subjects);
+  checkUnique('мотивация', motivations);
   checkUnique('гипотеза', hypotheses);
   checkUnique('задача', tasks);
   checkUnique('блокер', blockers);
 
-  const exists = (id: unknown, what: string): boolean => {
-    if (isStr(id) && seen.has(id)) return true;
-    errors.push(`${what}: ссылка на несуществующий id '${String(id)}'`);
-    return false;
+  /** Ссылка обязана существовать И вести на допустимый тип сущности. */
+  const link = (id: unknown, what: string, allowed: readonly Kind[]): boolean => {
+    if (!isStr(id) || id === '') {
+      errors.push(`${what}: пустая ссылка`);
+      return false;
+    }
+    const kind = seen.get(id);
+    if (kind === undefined) {
+      errors.push(`${what}: ссылка на несуществующий id '${id}'`);
+      return false;
+    }
+    if (!allowed.includes(kind)) {
+      errors.push(
+        `${what}: ссылка на '${id}' указывает на сущность типа '${kind}', а допускается только ${allowed.join(' / ')}`,
+      );
+      return false;
+    }
+    return true;
   };
 
-  // --- дополнительные цели и отдельные метрики (мягкие поля) ---
-  for (const g of extraGoals) {
+  // --- цели: убранные поля старой схемы ---
+  for (const g of [goal, ...extraGoals]) {
     const gid = isStr(g['id']) ? g['id'] : '?';
-    if (g['level'] !== undefined && g['level'] !== 'top' && g['level'] !== 'sub') {
-      errors.push(`цель '${gid}': недопустимый level '${String(g['level'])}' (top|sub)`);
+    for (const legacy of ['level', 'parentTask'] as const) {
+      if (g[legacy] !== undefined) {
+        errors.push(
+          `цель '${gid}': поле '${legacy}' удалено — связь задача→цель запрещена стандартом; масштабная задача раскрывается отдельной картой (task.childMapId)`,
+        );
+      }
     }
-    if (isStr(g['parentTask']) && g['parentTask'] !== '') {
-      exists(g['parentTask'], `цель '${gid}' (parentTask)`);
+    for (const m of (Array.isArray(g['metrics']) ? g['metrics'] : []) as Entity[]) {
+      const mid = isStr(m['id']) ? m['id'] : '?';
+      for (const field of ['current', 'target'] as const) {
+        const value = m[field];
+        if (typeof value !== 'string' || value === '') {
+          errors.push(`метрика '${mid}': пустое поле '${field}'`);
+        }
+      }
     }
   }
+
+  // --- отдельные метрики: метрика → цель ---
   for (const m of separatedMetrics) {
     const mid = isStr(m['id']) ? m['id'] : '?';
     for (const field of ['current', 'target'] as const) {
@@ -99,21 +134,11 @@ export function validateMap(input: unknown): string[] {
         errors.push(`метрика '${mid}': пустое поле '${field}'`);
       }
     }
-    if (isStr(m['goalRef']) && m['goalRef'] !== '') {
-      exists(m['goalRef'], `метрика '${mid}' (goalRef)`);
-    } else {
-      errors.push(`метрика '${mid}': не указана цель (поле 'goalRef')`);
-    }
-  }
-
-  // --- метрики ---
-  for (const m of metricList) {
-    const mid = isStr(m['id']) ? m['id'] : '?';
-    for (const field of ['current', 'target'] as const) {
-      const value = m[field];
-      if (typeof value !== 'string' || value === '') {
-        errors.push(`метрика '${mid}': пустое поле '${field}'`);
-      }
+    link(m['goalRef'], `метрика '${mid}' (goalRef)`, ['цель']);
+    if (!LEVELS.includes(m['influence'] as Level)) {
+      errors.push(
+        `метрика '${mid}': недопустимое влияние '${String(m['influence'])}' относительно цели (${LEVELS.join('|')})`,
+      );
     }
   }
 
@@ -129,11 +154,30 @@ export function validateMap(input: unknown): string[] {
     if (goalRefs !== undefined && !isStrArray(goalRefs)) {
       errors.push(`субъект '${sid}': 'goals' должен быть списком id целей`);
     } else if (isStrArray(goalRefs)) {
-      for (const gid of goalRefs) exists(gid, `субъект '${sid}' (цель)`);
+      for (const gid of goalRefs) link(gid, `субъект '${sid}' (цель)`, ['цель']);
     }
   }
 
-  // --- гипотезы ---
+  // --- боли/желания: мотивация → субъект ---
+  for (const mo of motivations) {
+    const moid = isStr(mo['id']) ? mo['id'] : '?';
+    if (!MOTIVATION_KINDS.includes(mo['kind'] as MotivationKind)) {
+      errors.push(
+        `боль/желание '${moid}': недопустимый kind '${String(mo['kind'])}' (pain|wish)`,
+      );
+    }
+    link(mo['subject'], `боль/желание '${moid}' (subject)`, ['субъект']);
+    if (!LEVELS.includes(mo['influence'] as Level)) {
+      errors.push(
+        `боль/желание '${moid}': недопустимое влияние '${String(mo['influence'])}' относительно субъекта (${LEVELS.join('|')})`,
+      );
+    }
+    if (!isStr(mo['description']) || mo['description'].trim() === '') {
+      errors.push(`боль/желание '${moid}': пустое описание`);
+    }
+  }
+
+  // --- гипотезы: Если—то—потому что—тогда; цель воздействия — субъект/мотивация/цель ---
   for (const h of hypotheses) {
     const hid = isStr(h['id']) ? h['id'] : '?';
     for (const part of ['if', 'then', 'because', 'so'] as const) {
@@ -144,16 +188,21 @@ export function validateMap(input: unknown): string[] {
         );
       }
     }
-    if (isStr(h['subject']) && h['subject'] !== '') {
-      exists(h['subject'], `гипотеза '${hid}' (субъект)`);
-    } else {
-      errors.push(`гипотеза '${hid}': не привязана к субъекту`);
+    if (h['subject'] !== undefined) {
+      errors.push(
+        `гипотеза '${hid}': поле 'subject' переименовано в 'target' (субъект, его боль/желание или цель для бессубъектного контура)`,
+      );
     }
+    link(
+      h['target'],
+      `гипотеза '${hid}' (target)`,
+      ['субъект', 'мотивация', 'цель'],
+    );
     const hypMetrics = h['metrics'];
     if (!isStrArray(hypMetrics) || hypMetrics.length === 0) {
       errors.push(`гипотеза '${hid}': не указана ни одна метрика влияния`);
     } else {
-      for (const mid of hypMetrics) exists(mid, `гипотеза '${hid}' (метрика)`);
+      for (const mid of hypMetrics) link(mid, `гипотеза '${hid}' (метрика)`, ['метрика']);
     }
     if (!STATUSES.includes(h['status'] as HypothesisStatus)) {
       errors.push(
@@ -169,26 +218,23 @@ export function validateMap(input: unknown): string[] {
     }
   }
 
-  // --- задачи ---
+  // --- задачи: ТОЛЬКО задача → гипотеза ---
   for (const t of tasks) {
     const tid = isStr(t['id']) ? t['id'] : '?';
-    if (isStr(t['hypothesis']) && t['hypothesis'] !== '') {
-      exists(t['hypothesis'], `задача '${tid}'`);
-    } else {
-      errors.push(`задача '${tid}': не привязана к гипотезе`);
+    if (t['goalRef'] !== undefined) {
+      errors.push(
+        `задача '${tid}': связь задача→цель запрещена — задачи ведут только на гипотезы; масштабная задача раскрывается отдельной картой (childMapId), а не стрелкой`,
+      );
     }
-    if (isStr(t['goalRef']) && t['goalRef'] !== '') {
-      exists(t['goalRef'], `задача '${tid}' (goalRef — цель уровнем ниже)`);
-    }
+    link(t['hypothesis'], `задача '${tid}'`, ['гипотеза']);
   }
 
   // --- блокеры ---
   for (const b of blockers) {
     const bid = isStr(b['id']) ? b['id'] : '?';
-    if (isStr(b['blocks']) && b['blocks'] !== '') {
-      exists(b['blocks'], `блокер '${bid}'`);
-    } else {
-      errors.push(`блокер '${bid}': не указано, что блокируется (поле 'blocks')`);
+    link(b['blocks'], `блокер '${bid}'`, ['задача']);
+    if (!isStr(b['reason']) || b['reason'].trim() === '') {
+      errors.push(`блокер '${bid}': не указана причина (поле 'reason')`);
     }
   }
 

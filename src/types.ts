@@ -1,10 +1,13 @@
 /**
  * Схема данных карты гипотез (см. openspec/changes/add-web-app/specs/map-model).
- * Унаследована от прежнего map.yaml без изменения смысла.
+ * Правила методологии — docs/knowledge-base/.../standard-1.2.md.
+ * Каноническая топология: Задача → Гипотеза → Субъект → Цель;
+ * допустим бессубъектный контур Задача → Гипотеза → Цель.
  */
 
 export type Level = 'low' | 'medium' | 'high';
 export type HypothesisStatus = 'draft' | 'to-verify' | 'confirmed' | 'refuted';
+export type MotivationKind = 'pain' | 'wish';
 
 export interface MapMeta {
   title: string;
@@ -26,24 +29,35 @@ export interface Goal {
   id: string;
   description: string;
   metrics: Metric[];
-  /** Дополнительные цели (многоцелевая карта): 'top' — ещё одна цель верхнего уровня, 'sub' — цель уровнем ниже. */
-  level?: 'top' | 'sub';
-  /** Для цели уровнем ниже: задача верхней карты, которая её породила. */
-  parentTask?: string;
 }
 
 export interface SeparatedMetric extends Metric {
-  /** Расширенная топология: метрика отдельной карточкой — к какой цели относится. */
+  /** Топология «метрики на отдельном уровне»: к какой цели относится метрика. */
   goalRef: string;
+  /** Влияние метрики относительно цели. */
+  influence: Level;
+}
+
+/** Топология «мотивация на отдельном уровне»: боль или желание субъекта
+ * отдельной карточкой; гипотезы бьют в конкретную мотивацию,
+ * мотивация влияет на субъекта. */
+export interface Motivation {
+  id: string;
+  kind: MotivationKind;
+  description: string;
+  subject: string;
+  /** Влияние мотивации относительно субъекта. */
+  influence: Level;
 }
 
 export interface Subject {
   id: string;
   description: string;
   influence: Level;
+  /** Классическая топология: мотивация текстом внутри карточки субъекта. */
   pains?: string[];
   wishes?: string[];
-  /** Негативный субъект — тот, кто препятствует достижению цели. */
+  /** Негативный субъект — намеренно мешает достижению цели. */
   negative?: boolean;
   /** Цели, на которые влияет субъект (многоцелевая карта); по умолчанию — главная. */
   goals?: string[];
@@ -52,7 +66,10 @@ export interface Subject {
 /** Формат «Если—то—потому что—тогда». */
 export interface Hypothesis {
   id: string;
-  subject: string;
+  /** Цель воздействия гипотезы: субъект, его боль/желание или цель
+   * (бессубъектный контур). */
+  target: string;
+  /** Структурная связь с метриками цели — тегом в модели, стрелкой не рисуется. */
   metrics: string[];
   influence: Level;
   cost: Level;
@@ -69,8 +86,9 @@ export interface Task {
   description: string;
   owner?: string;
   due?: string;
-  /** Многоуровневая карта: крупная задача связана с целью уровнем ниже. */
-  goalRef?: string;
+  /** Многоуровневая карта: id дочерней карты, раскрывающей эту задачу.
+   * Структурная связь, стрелкой не рисуется. */
+  childMapId?: string;
 }
 
 export interface Blocker {
@@ -86,11 +104,13 @@ export interface HypothesisMap {
   schemaVersion: 1;
   meta: MapMeta;
   goal: Goal;
-  /** Дополнительные цели: верхнего уровня ('top') и уровнем ниже ('sub'). */
+  /** Дополнительные цели верхнего уровня (многоцелевая карта). */
   goals?: Goal[];
-  /** Метрики отдельными карточками (расширенная топология). */
+  /** Метрики отдельными карточками (топология «метрики на отдельном уровне»). */
   metrics?: SeparatedMetric[];
   subjects: Subject[];
+  /** Боли и желания отдельными карточками (топология «мотивация на отдельном уровне»). */
+  motivations?: Motivation[];
   hypotheses: Hypothesis[];
   tasks: Task[];
   blockers: Blocker[];
