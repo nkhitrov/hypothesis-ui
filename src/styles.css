@@ -228,11 +228,21 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 .pane.projects-pane {
   width: 250px;
+  flex-shrink: 0;
   border-right: 1px solid var(--line);
+}
+
+/* панель карт занимает остаток ширины сайдбара и НЕ раздувается под
+   длинные названия (min-width: 0 — иначе flex-колонка растёт по контенту
+   и элементы вылезают за рамки панели) */
+.pane.maps-pane {
+  flex: 1;
+  min-width: 0;
 }
 
 .pane-title {
