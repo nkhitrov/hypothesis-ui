@@ -662,6 +662,112 @@ const METRICS_LEVEL_MAP: HypothesisMap = {
   blockers: [],
 };
 
+/** Топология «иерархия целей» (topology.md №4): цель — связка из нескольких
+ *  элементов; корень («цель на 10 лет») левее, под-цели («на 3 года») —
+ *  правее, стратегия строится от под-целей. Стрелка под-цель → родитель. */
+const GOAL_HIERARCHY_MAP: HypothesisMap = {
+  schemaVersion: 1,
+  meta: {
+    title: 'Демо: Иерархия целей (10 лет → 3 года)',
+    version: 1,
+    date: '2026-11-17',
+  },
+  goal: {
+    id: 'goal-10y',
+    description: 'Через 10 лет: платформа — стандарт подготовки рабочих профессий в стране',
+    metrics: [
+      {
+        id: 'metric-employed',
+        description: 'Доля выпускников, трудоустроенных по профессии',
+        current: '41%',
+        target: '70%',
+      },
+    ],
+  },
+  goals: [
+    {
+      id: 'goal-3y-product',
+      description: 'Через 3 года: учебный продукт окупает себя без грантов',
+      parent: 'goal-10y',
+      influence: 'high',
+      metrics: [
+        {
+          id: 'metric-margin',
+          description: 'Маржинальность продукта',
+          current: '−18%',
+          target: '+15%',
+        },
+      ],
+    },
+    {
+      id: 'goal-3y-network',
+      description: 'Через 3 года: сеть колледжей-партнёров покрывает 20 регионов',
+      parent: 'goal-10y',
+      influence: 'medium',
+      metrics: [],
+    },
+  ],
+  subjects: [
+    {
+      id: 'subject-student',
+      description: 'Студент колледжа 17–20 лет, выбирающий между подработкой и учёбой',
+      influence: 'high',
+      pains: ['Боится остаться без денег во время учёбы'],
+      wishes: ['Хочет работать по профессии уже с первого курса'],
+      goals: ['goal-3y-product'],
+    },
+    {
+      id: 'subject-dean',
+      description: 'Директор колледжа, отвечающий за набор студентов',
+      influence: 'medium',
+      pains: ['Боится оттока абитуриентов к курсам-конкурентам'],
+      wishes: [],
+      goals: ['goal-3y-network'],
+    },
+  ],
+  hypotheses: [
+    {
+      id: 'hyp-dual',
+      target: 'subject-student',
+      metrics: ['metric-margin'],
+      influence: 'high',
+      cost: 'medium',
+      status: 'to-verify',
+      if: 'Если открыть дуальный формат «дни в колледже + дни на предприятии» с оплачиваемой практикой,',
+      then: 'то студент остаётся на учёбе и приводит друзей на свой поток,',
+      because: 'потому что ему нужны деньги и практика по профессии с первого курса,',
+      so: 'тогда маржинальность продукта растёт за счёт софинансирования предприятиями.',
+    },
+    {
+      id: 'hyp-partner',
+      target: 'subject-dean',
+      metrics: [],
+      influence: 'medium',
+      cost: 'low',
+      status: 'draft',
+      if: 'Если отдать колледжу готовую программу и методику за долю от набора,',
+      then: 'то директор запускает набор без собственных разработок,',
+      because: 'боится оттока абитуриентов к конкурентам и хочет быстрый результат,',
+      so: 'тогда сеть растёт без наших капитальных затрат.',
+    },
+  ],
+  tasks: [
+    {
+      id: 'task-dual-pilot',
+      hypothesis: 'hyp-dual',
+      description: 'Соглашения с 3 предприятиями о оплачиваемых местах практики',
+      owner: 'Продукт',
+    },
+    {
+      id: 'task-partner-pilot',
+      hypothesis: 'hyp-partner',
+      description: 'Пилот с двумя колледжами по готовой программе',
+      owner: 'Партнёрства',
+    },
+  ],
+  blockers: [],
+};
+
 /** Демо-карты первого запуска; основная — «Гончар» (пример из базы знаний). */
 export const DEMO_MAPS: Array<{ id: string; map: HypothesisMap }> = [
   { id: 'demo-gonchar', map: GONCHAR_MAP },
@@ -669,4 +775,5 @@ export const DEMO_MAPS: Array<{ id: string; map: HypothesisMap }> = [
   { id: 'demo-smennsy-level2', map: SMENNSY_LEVEL2_MAP },
   { id: 'demo-multi-goals', map: MULTI_GOALS_MAP },
   { id: 'demo-metrics-level', map: METRICS_LEVEL_MAP },
+  { id: 'demo-goal-hierarchy', map: GOAL_HIERARCHY_MAP },
 ];

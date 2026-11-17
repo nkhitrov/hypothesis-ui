@@ -125,6 +125,35 @@ export function validateMap(input: unknown): string[] {
     }
   }
 
+  // --- иерархия целей (topology.md №4): цель-связка из нескольких элементов ---
+  const allGoalEnts = [goal, ...extraGoals];
+  const parentOfGoal = new Map<string, string>();
+  for (const g of allGoalEnts) {
+    if (isStr(g['id']) && isStr(g['parent'])) parentOfGoal.set(g['id'], g['parent']);
+  }
+  /** Разложенная цель — у неё есть под-цели; прямые связи к ней запрещены. */
+  const decomposed = new Set<string>(parentOfGoal.values());
+  for (const g of allGoalEnts) {
+    const gid = isStr(g['id']) ? g['id'] : '?';
+    if (g['influence'] !== undefined && !LEVELS.includes(g['influence'] as Level)) {
+      errors.push(
+        `цель '${gid}': недопустимое влияние '${String(g['influence'])}' относительно родителя (${LEVELS.join('|')})`,
+      );
+    }
+    if (g['parent'] === undefined) continue;
+    if (!link(g['parent'], `цель '${gid}' (parent)`, ['цель'])) continue;
+    // цикл: поднимаемся по цепочке родителей до повтора
+    let cur: string | null = isStr(g['parent']) ? g['parent'] : null;
+    const chain: string[] = [gid];
+    while (cur && !chain.includes(cur)) {
+      chain.push(cur);
+      cur = parentOfGoal.get(cur) ?? null;
+    }
+    if (cur === gid) {
+      errors.push(`цель '${gid}': цикл в иерархии целей (${chain.join(' → ')} → ${gid})`);
+    }
+  }
+
   // --- отдельные метрики: метрика → цель ---
   for (const m of separatedMetrics) {
     const mid = isStr(m['id']) ? m['id'] : '?';
@@ -135,6 +164,12 @@ export function validateMap(input: unknown): string[] {
       }
     }
     link(m['goalRef'], `метрика '${mid}' (goalRef)`, ['цель']);
+    const mGoal = isStr(m['goalRef']) ? m['goalRef'] : '';
+    if (decomposed.has(mGoal)) {
+      errors.push(
+        `метрика '${mid}': цель '${mGoal}' разложена на под-цели — привяжите метрику к под-цели (goalRef), а не к разложенной цели`,
+      );
+    }
     if (!LEVELS.includes(m['influence'] as Level)) {
       errors.push(
         `метрика '${mid}': недопустимое влияние '${String(m['influence'])}' относительно цели (${LEVELS.join('|')})`,
@@ -166,9 +201,16 @@ export function validateMap(input: unknown): string[] {
       for (const mid of metricRefs) link(mid, `субъект '${sid}' (метрика)`, ['метрика']);
     }
     // цель с вынесенными метриками не обходится: субъект обязан влиять
-    // хотя бы на одну метрику такой цели, а не на саму цель
+    // хотя бы на одну метрику такой цели, а не на саму цель;
+    // разложенная на под-цели цель не принимает субъектов вовсе
     for (const gid of goalIds) {
       if (gid === '') continue;
+      if (decomposed.has(gid)) {
+        errors.push(
+          `субъект '${sid}': цель '${gid}' разложена на под-цели — привяжите субъект к под-целям (subject.goals), а не к разложенной цели`,
+        );
+        continue;
+      }
       const goalMetrics = separatedMetrics
         .filter((m) => m['goalRef'] === gid)
         .map((m) => (isStr(m['id']) ? m['id'] : ''))
@@ -249,6 +291,11 @@ export function validateMap(input: unknown): string[] {
       if (goalMetrics.length > 0) {
         errors.push(
           `гипотеза '${hid}': цель '${targetId}' имеет вынесенные метрики (${goalMetrics.join(', ')}) — привяжите гипотезу к метрике (бессубъектный контур), а не к цели`,
+        );
+      }
+      if (decomposed.has(targetId)) {
+        errors.push(
+          `гипотеза '${hid}': цель '${targetId}' разложена на под-цели — привяжите гипотезу к под-цели, а не к разложенной цели`,
         );
       }
     }

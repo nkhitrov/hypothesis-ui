@@ -29,6 +29,12 @@ export interface Goal {
   id: string;
   description: string;
   metrics: Metric[];
+  /** Топология «иерархия целей»: родительская цель (корень левее, под-цель
+   *  правее; «цель на 10 лет → цель на 3 года → стратегия»). Стрелка
+   *  под-цель → родитель, стрелкой в модели — обычное ребро влияния. */
+  parent?: string;
+  /** Влияние под-цели относительно родителя (для стрелки и цифры). */
+  influence?: Level;
 }
 
 export interface SeparatedMetric extends Metric {
