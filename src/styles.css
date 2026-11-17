@@ -556,3 +556,48 @@ button {
   font-size: 14px;
   color: #777;
 }
+
+/* --- Проекты и переходы между картами --- */
+
+/* карточка цели дочерней карты (колонка справа от задач): клик открывает ту карту */
+.card.has-link {
+  cursor: pointer;
+}
+
+.card.has-link:hover {
+  filter: brightness(0.96);
+}
+
+/* кнопка «← назад» в топбаре */
+.topbar .btn.back {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* селектор проекта в панели карт */
+.sidebar .projects {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.sidebar .projects select {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.sidebar .empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 10px 16px;
+}

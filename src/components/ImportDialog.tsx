@@ -1,20 +1,26 @@
+import type { ProjectFile } from '../model/storage';
 import { ValidationErrors } from './ValidationErrors';
 
 export interface ImportPayload {
   fileName: string;
   data: unknown;
   errors: string[];
+  /** Файл-проект (группа карт) — режим импорта проекта; null — одиночная карта. */
+  project: ProjectFile | null;
 }
 
 interface Props {
   payload: ImportPayload;
-  onConfirm: (asNewMap: boolean) => void;
+  onConfirmMap: (asNewMap: boolean) => void;
+  onConfirmProject: (replaceCurrent: boolean) => void;
   onCancel: () => void;
 }
 
-/** Диалог импорта: создать новую карту или заменить текущую; при ошибках — только отмена. */
-export function ImportDialog({ payload, onConfirm, onCancel }: Props) {
-  const title =
+/** Диалог импорта: карта («новая | заменить») или проект («новый | заменить
+ *  текущий»); при ошибках — только отмена, как раньше. */
+export function ImportDialog({ payload, onConfirmMap, onConfirmProject, onCancel }: Props) {
+  const mapTitle =
+    payload.project === null &&
     payload.errors.length === 0 &&
     typeof payload.data === 'object' &&
     payload.data !== null &&
@@ -26,9 +32,15 @@ export function ImportDialog({ payload, onConfirm, onCancel }: Props) {
   return (
     <div className="dialog-backdrop">
       <div className="dialog">
-        <h3>Импорт карты</h3>
+        <h3>{payload.project ? 'Импорт проекта' : 'Импорт карты'}</h3>
         <div className="file">{payload.fileName}</div>
-        {title && <p>«{title}»</p>}
+        {payload.project ? (
+          <p>
+            «{payload.project.project.title}» — карт: {payload.project.maps.length}
+          </p>
+        ) : (
+          mapTitle && <p>«{mapTitle}»</p>
+        )}
         {payload.errors.length > 0 ? (
           <>
             <p>Импорт невозможен — найдены проблемы:</p>
@@ -39,15 +51,27 @@ export function ImportDialog({ payload, onConfirm, onCancel }: Props) {
               </button>
             </div>
           </>
+        ) : payload.project ? (
+          <div className="actions">
+            <button className="btn" onClick={onCancel}>
+              Отмена
+            </button>
+            <button className="btn" onClick={() => onConfirmProject(false)}>
+              Создать новый проект
+            </button>
+            <button className="btn primary" onClick={() => onConfirmProject(true)}>
+              Заменить текущий проект
+            </button>
+          </div>
         ) : (
           <div className="actions">
             <button className="btn" onClick={onCancel}>
               Отмена
             </button>
-            <button className="btn" onClick={() => onConfirm(true)}>
+            <button className="btn" onClick={() => onConfirmMap(true)}>
               Создать новую карту
             </button>
-            <button className="btn primary" onClick={() => onConfirm(false)}>
+            <button className="btn primary" onClick={() => onConfirmMap(false)}>
               Заменить текущую
             </button>
           </div>

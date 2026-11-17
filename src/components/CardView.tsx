@@ -6,6 +6,8 @@ import { CARD_PALETTE, PRIORITY_COLORS } from '../model/layout';
 
 export interface StickyNodeData extends Record<string, unknown> {
   card: CardNode;
+  /** Переход в дочернюю карту — кликом по карточке цели. */
+  openMap?: (id: string) => void;
 }
 
 export type StickyNode = Node<StickyNodeData, 'sticky'>;
@@ -27,6 +29,7 @@ const HIDDEN_HANDLE: CSSProperties = {
 export function CardView({ data }: NodeProps<StickyNode>) {
   const node = data.card;
   const palette = CARD_PALETTE[node.kind];
+  const openMap = data.openMap;
   // квадратик цифры ~1/9 высоты карточки; примыкает ПРАВОЙ гранью к левой
   // грани карточки (в углу, сбоку, не налезая на карточку)
   const badgeSize = Math.max(34, Math.min(60, Math.round(node.h / 9)));
@@ -34,13 +37,24 @@ export function CardView({ data }: NodeProps<StickyNode>) {
 
   return (
     <div
-      className={`card kind-${node.kind}`}
+      // nopan: без него d3-zoom панели React Flow глотает реальные клики
+      // по содержимому узла — карточка цели не открывала дочернюю карту
+      className={`card kind-${node.kind}${node.linkTo ? ' has-link nopan' : ''}`}
+      title={node.linkTo ? 'Открыть карту уровнем ниже' : undefined}
       style={{
         width: '100%',
         minHeight: '100%',
         background: node.fill ?? palette.fill,
         ...(node.extraStyle ? styleFromExtra(node.extraStyle) : null),
       }}
+      onClick={
+        node.linkTo
+          ? (e) => {
+              e.stopPropagation();
+              openMap?.(node.linkTo!);
+            }
+          : undefined
+      }
     >
       <Handle type="source" position={Position.Left} id="s-left" style={HIDDEN_HANDLE} />
       <Handle
