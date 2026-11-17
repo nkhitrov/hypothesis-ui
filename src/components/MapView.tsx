@@ -16,14 +16,16 @@ import { FlowEdge } from './FlowEdge';
 
 interface Props {
   map: HypothesisMap;
+  /** Переход в дочернюю карту: клик по задаче с task.childMapId. */
+  onOpenMap?: (id: string) => void;
 }
 
 const nodeTypes = { sticky: CardView };
 const edgeTypes = { flow: FlowEdge };
 
 /** Доска на React Flow: карточки-узлы и строго горизонтальные стрелки
- * (плавные кривые справа налево, вход в правую грань). Без анимаций. */
-export function MapView({ map }: Props) {
+ *  (плавные кривые справа налево, вход в правую грань). Без анимаций. */
+export function MapView({ map, onOpenMap }: Props) {
   const { nodes, edges } = useMemo(() => {
     const layout = computeLayout(map);
     const rfNodes: Node<StickyNodeData>[] = layout.cards.map((c) => ({
@@ -77,6 +79,10 @@ export function MapView({ map }: Props) {
         nodesConnectable={false}
         elementsSelectable={false}
         edgesFocusable={false}
+        onNodeClick={(_, node) => {
+          const link = (node.data as StickyNodeData).card.linkTo;
+          if (link) onOpenMap?.(link);
+        }}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.3} color="#d9d9d9" />

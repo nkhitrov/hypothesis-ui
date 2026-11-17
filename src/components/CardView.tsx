@@ -34,7 +34,8 @@ export function CardView({ data }: NodeProps<StickyNode>) {
 
   return (
     <div
-      className={`card kind-${node.kind}`}
+      className={`card kind-${node.kind}${node.linkTo ? ' has-link' : ''}`}
+      title={node.linkTo ? 'Открыть карту уровнем ниже' : undefined}
       style={{
         width: '100%',
         minHeight: '100%',
