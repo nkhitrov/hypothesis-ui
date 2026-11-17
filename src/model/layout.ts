@@ -284,6 +284,13 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   }
 
   // --- Гипотезы: связки жирным, статусы — только оформлением ---
+  // Метрики влияния — приём «тэги вместо стрелок» (topology.md): связь
+  // хранится в модели (hypothesis.metrics), стрелкой не рисуется, но видна
+  // на карточке гипотезы строкой «Метрики: …» — иначе влияние гипотезы
+  // на метрики теряется. Пусто — «нужно заполнить», как у целей/субъектов.
+  const metricName = new Map<string, string>();
+  for (const g of allGoals) for (const m of g.metrics) metricName.set(m.id, m.description);
+  for (const m of map.metrics ?? []) metricName.set(m.id, m.description);
   for (const h of map.hypotheses) {
     const c = new Card(h.id, 'hypothesis');
     c.priority = LEVEL_TO_PRIORITY[h.influence] ?? null;
@@ -292,6 +299,8 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
     c.add('то', h.then);
     c.add('потому что', h.because);
     c.add('тогда', h.so);
+    const names = h.metrics.map((id) => metricName.get(id) ?? id).join(', ');
+    c.add('Метрики:', names || 'нужно заполнить', names ? undefined : { cls: 'muted' });
     c.extraStyle =
       h.status === 'confirmed'
         ? 'outline:3px solid #2f8f2f;outline-offset:-3px'
