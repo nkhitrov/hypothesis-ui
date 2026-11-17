@@ -257,6 +257,21 @@ button {
   padding: 18px 24px;
 }
 
+/* Плашка направления задач (task.group) — нейтральная метка, не задача */
+.card.kind-taskLabel {
+  padding: 12px 18px;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.card.kind-taskLabel .row {
+  font-size: 16px;
+  line-height: 21px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #494d43;
+}
+
 .card .row {
   margin: 2px 0;
 }

@@ -27,6 +27,9 @@ export type CardKind =
   | 'motivation'
   | 'hypothesis'
   | 'task'
+  /** Нейтральная плашка-метка направления (task.group) — не карточка-задача,
+   *  стоит в колонке задач над группой (topology.md №7). */
+  | 'taskLabel'
   | 'childGoal'
   | 'blocker';
 export type EdgeKind = 'flow' | 'block';
@@ -107,6 +110,7 @@ const COLUMN_W: Record<CardKind, number> = {
   motivation: 320,
   hypothesis: 350,
   task: 390,
+  taskLabel: 390,
   childGoal: 340,
   blocker: 300,
 };
@@ -119,7 +123,8 @@ const average = (xs: number[]): number =>
  *  до «отступ + запас» (соседние колонки) рисуются прямой диагональю. */
 export const layoutGap = { value: COL_GAP };
 
-/** Палитра — цветовая кодировка стандарта 1.2 (не менять). */
+/** Палитра — цветовая кодировка стандарта 1.2 (не менять). Плашка направления
+ *  (taskLabel) — намеренно нейтральная: цвет задач менять нельзя (topology.md №7). */
 export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = {
   goal: { fill: '#cadf58', border: '#a3b544' },
   metric: { fill: '#cadf58', border: '#a3b544' },
@@ -128,6 +133,7 @@ export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = 
   motivation: { fill: '#ffc831', border: '#d9a41f' },
   hypothesis: { fill: '#ffef73', border: '#d9c94a' },
   task: { fill: '#a6cdff', border: '#84a5d6' },
+  taskLabel: { fill: '#f4f4f2', border: '#c9cbc4' },
   blocker: { fill: '#ffa391', border: '#d98070' },
 };
 
@@ -171,7 +177,7 @@ class Card {
     return COLUMN_W[this.kind];
   }
   get pad(): number {
-    return this.kind === 'task' ? TASK_PAD : PAD;
+    return this.kind === 'task' || this.kind === 'taskLabel' ? TASK_PAD : PAD;
   }
   /** Высота — строго по содержимому (описание + строки), как в стандарте. */
   get height(): number {
@@ -340,6 +346,22 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
       c.add('', `${t.owner ?? '—'}${t.due ? ` · до ${t.due}` : ''}`, { cls: 'muted' });
     }
     cards.set(t.id, c);
+  }
+
+  // --- Плашки направлений (task.group, topology.md №7): нейтральная метка
+  //     над блоком задач одного направления; цвет задач не меняется ---
+  const taskGroups = new Map<string, string[]>();
+  for (const t of map.tasks) {
+    const g = t.group?.trim();
+    if (!g) continue;
+    const list = taskGroups.get(g) ?? [];
+    list.push(t.id);
+    taskGroups.set(g, list);
+  }
+  for (const g of taskGroups.keys()) {
+    const c = new Card(`tasklabel-${g}`, 'taskLabel');
+    c.add('', g, { boldText: true });
+    cards.set(`tasklabel-${g}`, c);
   }
 
   // --- Цели дочерних карт: отдельные карточки в колонке справа от задач
@@ -636,7 +658,11 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   for (const card of cards.values()) {
     columnOf.set(
       card.id,
-      card.kind === 'goal' ? `goal-${goalDepth.get(card.id) ?? 0}` : card.kind,
+      card.kind === 'goal'
+        ? `goal-${goalDepth.get(card.id) ?? 0}`
+        : card.kind === 'taskLabel'
+          ? 'task'
+          : card.kind,
     );
   }
   const columnRank = (key: string): number =>
@@ -709,20 +735,34 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
     })),
   );
 
-  // 6) задачи — на полосе своей гипотезы
+  // 6) задачи — на полосе своей гипотезы; при разбивке по направлениям
+  //    (task.group) задачи одного направления идут одним блоком под плашкой,
+  //    блок центрируется на средней полосе гипотез своих задач
   {
-    const groups = new Map<string, string[]>();
+    const hypothesisOf = (tid: string): string =>
+      map.tasks.find((t) => t.id === tid)!.hypothesis;
+    const stacks: Stack[] = [];
+    const byHyp = new Map<string, string[]>();
     for (const t of map.tasks) {
-      const list = groups.get(t.hypothesis) ?? [];
+      if (t.group?.trim()) continue;
+      const list = byHyp.get(t.hypothesis) ?? [];
       list.push(t.id);
-      groups.set(t.hypothesis, list);
+      byHyp.set(t.hypothesis, list);
     }
-    placeColumn(
-      [...groups.entries()].map(([hyp, ids]) => ({
-        ids,
-        preferredCenter: centerY(hyp),
-      })),
-    );
+    for (const [hyp, ids] of byHyp) {
+      stacks.push({ ids, preferredCenter: centerY(hyp) });
+    }
+    for (const [g, ids] of taskGroups) {
+      // внутри блока — в порядке полос гипотез задач (стрелки не путаются)
+      const sorted = [...ids].sort(
+        (a, b) => centerY(hypothesisOf(a)) - centerY(hypothesisOf(b)),
+      );
+      stacks.push({
+        ids: [`tasklabel-${g}`, ...sorted],
+        preferredCenter: average(ids.map((id) => centerY(hypothesisOf(id)))),
+      });
+    }
+    placeColumn(stacks);
   }
 
   // 7) цели дочерних карт — на полосе своей задачи (колонка справа от задач)
