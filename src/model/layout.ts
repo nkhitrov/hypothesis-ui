@@ -4,11 +4,13 @@ import type { HypothesisMap, Level, MotivationKind } from '../types';
  * Раскладка карты для React Flow: строго горизонтальная карта,
  * стрелки идут только справа налево и входят в правую грань карточки.
  *
- * Колонки: цель | метрика | субъект | боль/желание | гипотеза | задача | блокер
- * (метрики — справа от целей, мотивация — справа от субъектов, стандарт 1.2).
- * Колонка — на каждый тип сущности; если сущностей такого типа нет, колонка
- * скрыта, остальные сдвигаются на её место. Отступ между всеми соседними
- * колонками одинаковый (COL_GAP).
+ * Колонки: цель(×уровни иерархии) | метрика | субъект | боль/желание | гипотеза
+ * | задача | блокер (метрики — справа от целей, мотивация — справа от субъектов,
+ * стандарт 1.2). Колонка — на каждый тип сущности; если сущностей такого типа
+ * нет, колонка скрыта, остальные сдвигаются на её место. Цели дробятся по
+ * глубине иерархии (топология №4): корень в крайней левой колонке, каждая
+ * под-цель — своей колонкой правее, стрелка под-цель → родитель. Отступ между
+ * всеми соседними колонками одинаковый (COL_GAP).
  *
  * По вертикали карточки группируются «полосами» своей ветки: цель с вынесенными
  * метриками и субъект с мотивацией — единые кластеры-блоки, субъекты встают
@@ -87,9 +89,9 @@ const COL_GAP_MAX = 520;
 /** Вертикальный отступ между кластерами «владелец + вынесенное». */
 const CLUSTER_GAP = 72;
 
-/** Порядок колонок слева направо; стрелки идут справа налево. */
-const COLUMN_ORDER: CardKind[] = [
-  'goal',
+/** Порядок колонок слева направо; стрелки идут справа налево. Колонки целей
+ *  (goal-0, goal-1, … по глубине иерархии) встают левее остальных типов. */
+const COLUMN_BASE_ORDER: CardKind[] = [
   'metric',
   'subject',
   'motivation',
@@ -215,6 +217,8 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   // не заполнен ни в карточке, ни вынесенными карточками — «Нужно заполнить».
   const goalCard = (g: typeof map.goal): Card => {
     const c = new Card(g.id, 'goal');
+    // под-цель иерархии — цифра влияния относительно родителя
+    if (g.parent && g.influence) c.priority = LEVEL_TO_PRIORITY[g.influence];
     c.add('', 'Цель', { boldText: true });
     c.add('', g.description);
     const extracted = (map.metrics ?? []).filter((m) => m.goalRef === g.id);
@@ -239,6 +243,22 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   cards.set(map.goal.id, goalCard(map.goal));
   for (const g of map.goals ?? []) cards.set(g.id, goalCard(g));
   const allGoals = [map.goal, ...(map.goals ?? [])];
+
+  // Иерархия целей (topology.md №4): глубина каждой цели (0 — корень);
+  // колонка цели = goal-<глубина>: корень левее, под-цель правее родителя
+  const goalDepth = new Map<string, number>();
+  const depthOfGoal = (id: string, guard: Set<string> = new Set()): number => {
+    const known = goalDepth.get(id);
+    if (known !== undefined) return known;
+    const g = allGoals.find((x) => x.id === id);
+    if (!g || !g.parent || guard.has(id)) return 0;
+    guard.add(id);
+    const d = 1 + depthOfGoal(g.parent, guard);
+    goalDepth.set(id, d);
+    return d;
+  };
+  for (const g of allGoals) depthOfGoal(g.id);
+  const maxGoalDepth = allGoals.reduce((m, g) => Math.max(m, goalDepth.get(g.id) ?? 0), 0);
 
   // --- Отдельные метрики: справа от целей, влияние относительно цели ---
   for (const m of map.metrics ?? []) {
@@ -394,6 +414,16 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
       kind: 'flow' as const,
       level: m.influence,
     })),
+    // под-цель → родительская цель (иерархия целей; влияние относительно
+    // родителя, без influence — серая структурная связь)
+    ...allGoals
+      .filter((g) => g.parent)
+      .map((g) => ({
+        from: g.id,
+        to: g.parent!,
+        kind: 'flow' as const,
+        level: g.influence ?? null,
+      })),
     // цель дочерней карты → своя задача: серая структурная стрелка
     // (раскрытие масштабной задачи картой уровнем ниже; без приоритета)
     ...map.tasks
@@ -507,16 +537,18 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
 
   // 1) цели с вынесенными метриками — кластеры-блоки: цель в центре полосы,
   //    её метрики — плотным ровным стеком на той же полосе; соседние кластеры
-  //    расходятся так, чтобы чужие метрики не попадали в полосу соседней цели
+  //    расходятся так, чтобы чужие метрики не попадали в полосу соседней цели.
+  //    Корневые цели (глубина 0) раскладываются последовательными кластерами
+  //    сверху вниз; под-цели (1b) якорятся на полосу своего родителя
   const metricOf = new Map<string, string[]>();
   for (const m of map.metrics ?? []) {
     const list = metricOf.get(m.goalRef) ?? [];
     list.push(m.id);
     metricOf.set(m.goalRef, list);
   }
-  const placeGoals = (): void => {
+  const placeRootGoals = (): void => {
     let prevBottom = -Infinity;
-    for (const g of allGoals) {
+    for (const g of allGoals.filter((x) => (goalDepth.get(x.id) ?? 0) === 0)) {
       const mids = metricOf.get(g.id) ?? [];
       const stackH = mids.length
         ? mids.reduce((acc, id) => acc + height(id), 0) + (mids.length - 1) * INNER_GAP
@@ -533,6 +565,22 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
         y += height(id) + INNER_GAP;
       }
       prevBottom = top + unitH;
+    }
+  };
+
+  // 1b) под-цели (глубина ≥ 1) — кластером на полосе своей точки входа в
+  //     родителя: под-цель стоит колонкой правее родителя, несколько детей
+  //     расходятся по его полосе (свои вынесенные метрики — тем же стеком)
+  const placeSubGoals = (): void => {
+    for (let d = 1; d <= maxGoalDepth; d++) {
+      const level = allGoals.filter((g) => (goalDepth.get(g.id) ?? 0) === d);
+      if (level.length === 0) continue;
+      placeColumn(
+        level.map((g) => ({
+          ids: [g.id, ...(metricOf.get(g.id) ?? [])],
+          preferredCenter: entryY.get(`${g.id}→${g.parent}`) ?? centerY(g.parent!),
+        })),
+      );
     }
   };
 
@@ -582,8 +630,22 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
 
   // X колонок: активные колонки (с хотя бы одной карточкой) идут в порядке
   // стандарта с единым отступом — расстояния между соседними колонками
-  // равны по построению, пустых колонок на карте нет.
-  const present = COLUMN_ORDER.filter((c) => [...cards.values()].some((k) => k.kind === c));
+  // равны по построению, пустых колонок на карте нет. Ключ колонки — строка:
+  // цели дробятся по глубине иерархии (goal-0, goal-1, …), остальные — свой тип.
+  const columnOf = new Map<string, string>();
+  for (const card of cards.values()) {
+    columnOf.set(
+      card.id,
+      card.kind === 'goal' ? `goal-${goalDepth.get(card.id) ?? 0}` : card.kind,
+    );
+  }
+  const columnRank = (key: string): number =>
+    key.startsWith('goal-')
+      ? Number(key.slice(5))
+      : 1000 + COLUMN_BASE_ORDER.indexOf(key as CardKind);
+  const columnWidth = (key: string): number =>
+    key.startsWith('goal-') ? COLUMN_W.goal! : COLUMN_W[key as CardKind]!;
+  const present = [...new Set(columnOf.values())].sort((a, b) => columnRank(a) - columnRank(b));
   const computeX = (): void => {
     // Величина отступа — одна на карту. От нижней границы растёт до тех пор,
     // пока самой крутой связи не хватит горизонтальной длины (|Δy| ≤ Δx:
@@ -592,27 +654,27 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
     let gap = COL_GAP;
     for (const e of edges) {
       if (!positions.has(e.from) || !positions.has(e.to)) continue;
-      const si = present.indexOf(cards.get(e.from)!.kind);
-      const ti = present.indexOf(cards.get(e.to)!.kind);
+      const si = present.indexOf(columnOf.get(e.from)!);
+      const ti = present.indexOf(columnOf.get(e.to)!);
       if (si <= ti) continue;
       const dy = Math.abs(centerY(e.from) - (entryY.get(`${e.from}→${e.to}`) ?? centerY(e.to)));
       const n = si - ti; // сколько зазоров перекрывает связь
       let widths = 0;
-      for (let i = ti + 1; i < si; i++) widths += COLUMN_W[present[i]!];
+      for (let i = ti + 1; i < si; i++) widths += columnWidth(present[i]!);
       const need = (dy - widths) / n; // зазор, дающий Δx ≥ Δy
       gap = Math.max(gap, Math.min(need, COL_GAP_MAX));
     }
     layoutGap.value = gap;
     let x = PAGE_PAD;
-    const colX = new Map<CardKind, number>();
+    const colX = new Map<string, number>();
     for (const column of present) {
       colX.set(column, x);
-      x += COLUMN_W[column] + gap;
+      x += columnWidth(column) + gap;
     }
     for (const card of cards.values()) {
       const p = positions.get(card.id);
       if (!p) continue; // колонка ещё не размещена (ранние итерации)
-      positions.set(card.id, { x: colX.get(card.kind)!, y: p.y });
+      positions.set(card.id, { x: colX.get(columnOf.get(card.id)!)!, y: p.y });
     }
   };
 
@@ -620,11 +682,13 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   // Размеры карточек жёсткие — по содержимому; кластеры «владелец+вынесенное»
   // держатся вместе. X от рёбер не зависит (единый отступ), поэтому считается
   // один раз в самом конце, после расстановки всех колонок.
-  placeGoals();
+  placeRootGoals();
+  placeSubGoals();
   placeSubjects();
   for (let i = 0; i < 4; i++) {
     assignEdges();
-    placeGoals();
+    placeRootGoals();
+    placeSubGoals();
     placeSubjects();
   }
   assignEdges();
