@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
 import type { HypothesisMap } from './types';
 import {
@@ -59,10 +59,31 @@ export default function App() {
   const [projectsTick, setProjectsTick] = useState(0);
   const [importPayload, setImportPayload] = useState<ImportPayload | null>(null);
   const [pendingDeleteMap, setPendingDeleteMap] = useState<string | null>(null);
-  const [pendingDeleteProject, setPendingDeleteProject] = useState(false);
+  const [pendingDeleteProject, setPendingDeleteProject] = useState<string | null>(null);
   const [navStack, setNavStack] = useState<NavEntry[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // выпадающее меню экспорта: закрытие по клику мимо и по Escape
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDown = (e: MouseEvent): void => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setExportOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [exportOpen]);
 
   const projects = useMemo(() => loadProjects(), [projectsTick]);
   const index = useMemo(
@@ -179,22 +200,27 @@ export default function App() {
     notify('Проект создан');
   };
 
-  const handleDeleteProject = (): void => {
-    setPendingDeleteProject(true);
+  /** Удаление любого проекта из списка (подтверждение показывает его название). */
+  const handleDeleteProject = (id: string): void => {
+    setPendingDeleteProject(id);
   };
 
   const confirmDeleteProject = (): void => {
-    setPendingDeleteProject(false);
-    deleteProject(currentProjectId);
+    const id = pendingDeleteProject;
+    setPendingDeleteProject(null);
+    if (!id) return;
+    deleteProject(id);
     setNavStack([]);
     setIndexTick((t) => t + 1);
     setProjectsTick((t) => t + 1);
-    const remaining = loadProjects();
-    if (remaining.length > 0) {
-      selectProject(remaining[0]!.id);
-    } else {
-      const fresh = createProject('Мои карты');
-      selectProject(fresh.id);
+    if (id === currentProjectId) {
+      const remaining = loadProjects();
+      if (remaining.length > 0) {
+        selectProject(remaining[0]!.id);
+      } else {
+        const fresh = createProject('Мои карты');
+        selectProject(fresh.id);
+      }
     }
     notify('Проект удалён');
   };
@@ -392,27 +418,68 @@ export default function App() {
           onBlur={(e) => renameMap(e.target.value)}
           aria-label="Название карты"
         />
-        <button className="btn" onClick={() => fileInputRef.current?.click()}>
-          Импорт
-        </button>
-        <button className="btn" onClick={() => void copyAs('yaml')} title="Скопировать YAML в буфер">
-          ⧉ YAML
-        </button>
-        <button className="btn" onClick={() => exportAs('yaml')}>
-          ↓ YAML
-        </button>
-        <button className="btn" onClick={() => exportAs('json')}>
-          ↓ JSON
-        </button>
         <button
           className="btn"
-          onClick={exportProject}
-          title={`Все карты проекта «${project?.title ?? ''}» одним файлом`}
+          onClick={() => fileInputRef.current?.click()}
+          title="Импорт карты или проекта из файла YAML/JSON"
         >
-          ↓ Проект
+          Импорт
         </button>
+        {/* редкие действия вынесены в выпадающее меню: топбар не перегружен */}
+        <div className="tb-menu" ref={exportMenuRef}>
+          <button
+            className="btn"
+            onClick={() => setExportOpen((v) => !v)}
+            title="Скачать или скопировать карту в разных форматах"
+            aria-expanded={exportOpen}
+            aria-haspopup="menu"
+          >
+            Экспорт ▾
+          </button>
+          {exportOpen && (
+            <div className="menu" role="menu">
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setExportOpen(false);
+                  void copyAs('yaml');
+                }}
+              >
+                ⧉ Скопировать YAML карты в буфер
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setExportOpen(false);
+                  exportAs('yaml');
+                }}
+              >
+                ↓ Скачать карту — YAML
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setExportOpen(false);
+                  exportAs('json');
+                }}
+              >
+                ↓ Скачать карту — JSON
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setExportOpen(false);
+                  exportProject();
+                }}
+                title={`Все карты проекта «${project?.title ?? ''}» одним файлом`}
+              >
+                ↓ Скачать проект — все карты (YAML)
+              </button>
+            </div>
+          )}
+        </div>
         {view === 'editor' ? (
-          <button className="btn" onClick={() => setView('board')}>
+          <button className="btn" onClick={() => setView('board')} title="Вернуться к доске">
             К карте
           </button>
         ) : (
@@ -421,6 +488,7 @@ export default function App() {
               <button
                 className={view === 'board' ? 'seg active' : 'seg'}
                 onClick={() => setView('board')}
+                title="Карточный вид: цели, субъекты, гипотезы, задачи"
               >
                 Карта
               </button>
@@ -432,7 +500,11 @@ export default function App() {
                 Задачи
               </button>
             </div>
-            <button className="btn primary" onClick={() => setView('editor')}>
+            <button
+              className="btn primary"
+              onClick={() => setView('editor')}
+              title="Правка модели карты текстом YAML/JSON"
+            >
               Модель как текст
             </button>
           </>
@@ -533,12 +605,14 @@ export default function App() {
         {pendingDeleteProject && (
           <ConfirmDialog
             title="Удалить проект?"
-            body={`Проект «${project?.title ?? ''}» и все его карты (${
-              loadIndex().filter((e) => e.projectId === currentProjectId).length
+            body={`Проект «${
+              loadProjects().find((p) => p.id === pendingDeleteProject)?.title ?? ''
+            }» и все его карты (${
+              loadIndex().filter((e) => e.projectId === pendingDeleteProject).length
             }) будут удалены безвозвратно.`}
             confirmLabel="Удалить проект"
             onConfirm={confirmDeleteProject}
-            onCancel={() => setPendingDeleteProject(false)}
+            onCancel={() => setPendingDeleteProject(null)}
           />
         )}
       </div>
