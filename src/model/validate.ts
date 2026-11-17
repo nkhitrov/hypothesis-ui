@@ -341,6 +341,9 @@ export function validateMap(input: unknown): string[] {
       );
     }
     link(t['hypothesis'], `задача '${tid}'`, ['гипотеза']);
+    if (t['group'] !== undefined && (!isStr(t['group']) || t['group'].trim() === '')) {
+      errors.push(`задача '${tid}': 'group' должен быть непустым названием направления`);
+    }
   }
 
   // --- блокеры ---

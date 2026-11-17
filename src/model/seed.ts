@@ -335,6 +335,7 @@ const SMENNSY_MAP: HypothesisMap = {
   tasks: [
     {
       id: 'task-demo-script',
+      group: 'Продукт',
       hypothesis: 'hyp-live-demo',
       description: 'Собрать сценарий демо на смене партнёра',
       owner: 'Аня',
@@ -342,6 +343,7 @@ const SMENNSY_MAP: HypothesisMap = {
     },
     {
       id: 'task-demo-funnel',
+      group: 'Продукт',
       hypothesis: 'hyp-live-demo',
       description: 'Настроить воронку триал → платный в аналитике',
       owner: 'Илья',
@@ -349,6 +351,7 @@ const SMENNSY_MAP: HypothesisMap = {
     },
     {
       id: 'task-sandbox-mvp',
+      group: 'Продукт',
       hypothesis: 'hyp-live-demo',
       description: 'Запустить песочницу как отдельный продукт',
       owner: 'Стас',
@@ -357,6 +360,7 @@ const SMENNSY_MAP: HypothesisMap = {
     },
     {
       id: 'task-dpa-template',
+      group: 'Юридическое',
       hypothesis: 'hyp-dpa',
       description: 'Подготовить шаблон DPA с юристами',
       owner: 'Мария',
@@ -364,6 +368,7 @@ const SMENNSY_MAP: HypothesisMap = {
     },
     {
       id: 'task-onprem-pilot',
+      group: 'Внедрение',
       hypothesis: 'hyp-onprem',
       description: 'Провести on-prem пилот на одном производстве',
       owner: 'Дима',
@@ -371,6 +376,7 @@ const SMENNSY_MAP: HypothesisMap = {
     },
     {
       id: 'task-partner-deck',
+      group: 'Партнёрства',
       hypothesis: 'hyp-partners',
       description: 'Собрать предложение для кадровых агентств',
       owner: 'Аня',
