@@ -5,7 +5,7 @@ interface Props {
   currentProjectId: string;
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
-  onDeleteProject: () => void;
+  onDeleteProject: (id: string) => void;
   index: MapIndexEntry[];
   currentId: string;
   /** childMapId → id карты-родителя (дочерние — с отступом под родителем). */
@@ -17,8 +17,10 @@ interface Props {
   onClose: () => void;
 }
 
-/** Панель карт: выбор проекта, список его карт (дочерние — под родителем),
- *  создание, дублирование, удаление. */
+/** Панель карт в две колонки: слева — список проектов, справа — карты
+ *  выбранного проекта (дочерние — под родителем с отступом). Полные
+ *  названия видны при наведении (подсказка), редкие действия — у кнопок
+ *  с подсказками. */
 export function Sidebar({
   projects,
   currentProjectId,
@@ -64,76 +66,94 @@ export function Sidebar({
     <aside className="sidebar">
       <header>
         <span>Карты</span>
-        <button className="btn small" onClick={onClose} title="Закрыть список">
+        <button className="btn small" onClick={onClose} title="Закрыть список (Esc не требуется)">
           ✕
         </button>
       </header>
-      <div className="projects">
-        <select
-          value={currentProjectId}
-          onChange={(e) => onSelectProject(e.target.value)}
-          aria-label="Проект"
-          title={project?.title}
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.title}
-            </option>
-          ))}
-        </select>
-        <button className="btn small" onClick={onCreateProject} title="Новый проект">
-          +
-        </button>
-        <button
-          className="btn small danger"
-          onClick={onDeleteProject}
-          title="Удалить проект со всеми картами"
-        >
-          ✕
-        </button>
-      </div>
-      <div className="maps">
-        {ordered.length === 0 && <div className="empty">В проекте пока нет карт</div>}
-        {ordered.map(({ entry, depth }) => (
-          <div
-            key={entry.id}
-            className={`map-item${entry.id === currentId ? ' active' : ''}${
-              depth > 0 ? ' child' : ''
-            }`}
-            style={depth > 0 ? { paddingLeft: 14 + depth * 16 } : undefined}
-            onClick={() => onSelect(entry.id)}
-          >
-            <span className="name" title={entry.title}>
-              {entry.title}
-            </span>
+      <div className="pane-wrap">
+        {/* левая колонка: проекты — видно все сразу, как и карты справа */}
+        <div className="pane projects-pane">
+          <div className="pane-title">
+            Проекты
             <button
               className="btn small"
-              title="Дублировать"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDuplicate(entry.id);
-              }}
+              onClick={onCreateProject}
+              title="Создать новый проект"
             >
-              ⧉
-            </button>
-            <button
-              className="btn small danger"
-              title="Удалить"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(entry.id);
-              }}
-            >
-              ✕
+              +
             </button>
           </div>
-        ))}
+          <div className="proj-list">
+            {projects.map((p) => (
+              <div
+                key={p.id}
+                className={`proj-item${p.id === currentProjectId ? ' active' : ''}`}
+                onClick={() => onSelectProject(p.id)}
+                title={p.title}
+              >
+                <span className="name">{p.title}</span>
+                <button
+                  className="btn small danger"
+                  title={`Удалить проект «${p.title}» со всеми его картами`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteProject(p.id);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* правая колонка: карты выбранного проекта */}
+        <div className="pane maps-pane">
+          <div className="pane-title" title={project?.title}>
+            {project?.title ?? 'Карты'}
+          </div>
+          <div className="maps">
+            {ordered.length === 0 && <div className="empty">В проекте пока нет карт</div>}
+            {ordered.map(({ entry, depth }) => (
+              <div
+                key={entry.id}
+                className={`map-item${entry.id === currentId ? ' active' : ''}${
+                  depth > 0 ? ' child' : ''
+                }`}
+                style={depth > 0 ? { paddingLeft: 14 + depth * 16 } : undefined}
+                onClick={() => onSelect(entry.id)}
+                title={entry.title}
+              >
+                <span className="name">{entry.title}</span>
+                <button
+                  className="btn small"
+                  title={`Дублировать «${entry.title}»`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDuplicate(entry.id);
+                  }}
+                >
+                  ⧉
+                </button>
+                <button
+                  className="btn small danger"
+                  title={`Удалить «${entry.title}»`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(entry.id);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+          <footer>
+            <button className="btn" onClick={onCreate} title="Создать новую пустую карту в проекте">
+              + Новая карта
+            </button>
+          </footer>
+        </div>
       </div>
-      <footer>
-        <button className="btn" onClick={onCreate}>
-          + Новая карта
-        </button>
-      </footer>
     </aside>
   );
 }
