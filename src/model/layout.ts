@@ -6,14 +6,16 @@ import type { HypothesisMap, Level, MotivationKind } from '../types';
  *
  * Колонки: цель | метрика | субъект | боль/желание | гипотеза | задача | блокер
  * (метрики — справа от целей, мотивация — справа от субъектов, стандарт 1.2).
+ * Колонка — на каждый тип сущности; если сущностей такого типа нет, колонка
+ * скрыта, остальные сдвигаются на её место. Отступ между всеми соседними
+ * колонками одинаковый (COL_GAP).
  *
- * Раскладка полосная: карточки выравниваются по «полосе» своей ветки —
- * субъекты и метрики встают на свои точки входа в цель (стрелки почти
- * горизонтальны по построению), цель при необходимости растягивается вниз,
- * чтобы равномерно распределённые по грани точки входа разошлись по полосам.
- * Позиции, точки входа и ширины колонок уточняются итеративно до сходимости;
- * коридоры стрелок субъект→цель считаются по фактической кривизне безье
- * в зоне колонки метрик, поэтому метрики не пересекаются стрелками.
+ * По вертикали карточки группируются «полосами» своей ветки: цель с вынесенными
+ * метриками и субъект с мотивацией — единые кластеры-блоки, субъекты встают
+ * на среднюю точку входа своих метрик/целей, гипотезы, задачи и блокеры —
+ * на полосу своей цели воздействия. Пологость стрелок обеспечивают
+ * распределённые по правой грани точки входа и эта группировка, а не ширина
+ * зазоров между колонками.
  */
 
 export type CardKind =
@@ -72,11 +74,13 @@ const TASK_PAD = 18;
 const GAP_Y = 48; // между группами/полосами
 const INNER_GAP = 28; // внутри группы (стек метрик/мотиваций/гипотез/задач)
 const PAGE_PAD = 60;
-/** Зазоры между колонками: вынесенное (метрики, боли/желания) прижато
- *  к своему владельцу вплотную — гораздо ближе остальных колонок. */
-const COL_GAP = 240;
-const OWNER_GAP = 50; // цель→метрика, субъект→мотивация
-const BLOCKER_GAP = 120;
+/** Единый отступ между соседними колонками: нижняя граница. Внутри карты
+ *  отступ один для всех пар колонок; при необходимости он подрастает
+ *  (см. computeX), чтобы самой крутой связи хватало горизонтальной длины. */
+const COL_GAP = 180;
+/** Потолок единого отступа: компактность важнее — самая крутая связь может
+ *  выйти лишь чуть круче диагонали, но не вертикалью ради пустых полей. */
+const COL_GAP_MAX = 520;
 /** Вертикальный отступ между кластерами «владелец + вынесенное». */
 const CLUSTER_GAP = 72;
 
@@ -101,19 +105,12 @@ const COLUMN_W: Record<CardKind, number> = {
 };
 const MIN_H: Partial<Record<CardKind, number>> = { goal: 340, task: 96 };
 
-/** Порог пологости стрелки: |Δy| ≤ SLOPE_MAX · Δx. Безье локально круче
- *  прямой между концами (~1.5×), поэтому порог ужесточён до ~24° среднего.
- *  Для коротких связей внутри кластера «владелец+вынесенное» допускается
- *  больший наклон: близость важнее пологости, короткая стрелка не выглядит
- *  вертикальной. */
-const SLOPE_MAX = 0.45;
-const OWNER_SLOPE_MAX = 2.2;
-/** Потолок зазора внутри кластера «владелец+вынесенное»: даже когда стрелке
- *  нужен наклон, кластер остаётся гораздо плотнее остальных колонок. */
-const OWNER_GAP_MAX = 120;
-
 const average = (xs: number[]): number =>
   xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+
+/** Отступ, выбранный при последней раскладке. Читает FlowEdge: связи длиной
+ *  до «отступ + запас» (соседние колонки) рисуются прямой диагональю. */
+export const layoutGap = { value: COL_GAP };
 
 /** Палитра — цветовая кодировка стандарта 1.2 (не менять). */
 export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = {
@@ -369,29 +366,54 @@ export function computeLayout(map: HypothesisMap): Layout {
     return p ? p.y + height(id) / 2 : PAGE_PAD;
   };
 
-  /** Разместить группы колонки сверху вниз без наложений, держась полосы.
-   *  keepOrder — не сортировать по предпочтению (порядок целей фиксирован). */
-  const placeColumn = (stacks: Stack[], keepOrder = false): void => {
+  /** Разместить группы колонки сверху вниз без наложений, минимизируя
+   *  максимальное отклонение центра группы от предпочтительной позиции.
+   *  Жадная расстановка «каждая как можно выше в пределах порога D»
+   *  осуществима ⇔ D достаточен; минимальный D ищется бинарным поиском —
+   *  колонка не отъезжает от своих полос дальше, чем физически неизбежно. */
+  const placeColumn = (stacks: Stack[]): void => {
     if (stacks.length === 0) return;
-    const sorted = keepOrder
-      ? stacks
-      : [...stacks].sort((a, b) => a.preferredCenter - b.preferredCenter);
-    let prevBottom = -Infinity;
-    for (const st of sorted) {
-      const total =
-        st.ids.reduce((acc, id) => acc + height(id), 0) + (st.ids.length - 1) * INNER_GAP;
-      const top = Math.max(
-        PAGE_PAD,
-        st.preferredCenter - total / 2,
-        Number.isFinite(prevBottom) ? prevBottom + GAP_Y : PAGE_PAD,
-      );
-      let y = top;
+    const sorted = [...stacks].sort((a, b) => a.preferredCenter - b.preferredCenter);
+    const heights = sorted.map(
+      (st) => st.ids.reduce((acc, id) => acc + height(id), 0) + (st.ids.length - 1) * INNER_GAP,
+    );
+    const topsFor = (D: number): number[] | null => {
+      const tops: number[] = [];
+      let prevBottom = -Infinity;
+      for (let i = 0; i < sorted.length; i++) {
+        const h = heights[i]!;
+        const top = Math.max(
+          PAGE_PAD,
+          sorted[i]!.preferredCenter - D - h / 2,
+          Number.isFinite(prevBottom) ? prevBottom + GAP_Y : PAGE_PAD,
+        );
+        if (top + h / 2 > sorted[i]!.preferredCenter + D) return null;
+        tops.push(top);
+        prevBottom = top + h;
+      }
+      return tops;
+    };
+    let lo = 0;
+    let hi = 4000;
+    let tops: number[] | null = null;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const r = topsFor(mid);
+      if (r) {
+        hi = mid;
+        tops = r;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    tops ??= topsFor(hi)!;
+    sorted.forEach((st, i) => {
+      let y = tops[i]!;
       for (const id of st.ids) {
         positions.set(id, { x: 0, y });
         y += height(id) + INNER_GAP;
       }
-      prevBottom = top + total;
-    }
+    });
   };
 
   // Точки входа: входящие связи цели сортируются по Y источника,
@@ -504,69 +526,35 @@ export function computeLayout(map: HypothesisMap): Layout {
 
   // 3) метрики размещены кластерами вместе с целями (см. placeGoals)
 
-  // X колонок: базовые зазоры, затем адаптивное расширение — зазоры
-  // растягиваются, пока каждую стрелку нельзя уложить в порог пологости
-  // (|Δy| ≤ SLOPE_MAX · Δx): вертикальных участков у стрелок не бывает
+  // X колонок: активные колонки (с хотя бы одной карточкой) идут в порядке
+  // стандарта с единым отступом — расстояния между соседними колонками
+  // равны по построению, пустых колонок на карте нет.
   const present = COLUMN_ORDER.filter((c) => [...cards.values()].some((k) => k.kind === c));
-  const colOf = new Map<string, number>();
-  present.forEach((c, i) => {
-    for (const card of cards.values()) if (card.kind === c) colOf.set(card.id, i);
-  });
   const computeX = (): void => {
-    // базовый зазор зависит от пары соседних колонок: «владелец→вынесенное»
-    // ужимается только когда вынесенная колонка реально присутствует
-    const gaps: number[] = present.slice(0, -1).map((c, i) => {
-      const next = present[i + 1]!;
-      if ((c === 'goal' && next === 'metric') || (c === 'subject' && next === 'motivation'))
-        return OWNER_GAP;
-      if (c === 'task' && next === 'blocker') return BLOCKER_GAP;
-      return COL_GAP;
-    });
-    const spanDx = (from: number, to: number): number => {
-      // от правой грани колонки to до левой грани колонки from
-      let sum = 0;
-      for (let i = to; i < from; i++) sum += gaps[i]!;
-      for (let i = to + 1; i < from; i++) sum += COLUMN_W[present[i]!];
-      return sum;
-    };
-    const isOwnerGap = (i: number): boolean => {
-      const c = present[i]!;
-      const next = present[i + 1]!;
-      return (c === 'goal' && next === 'metric') || (c === 'subject' && next === 'motivation');
-    };
-    for (let pass = 0; pass < 3; pass++) {
-      for (const e of edges) {
-        if (!positions.has(e.from) || !positions.has(e.to)) continue;
-        const si = colOf.get(e.from)!;
-        const ti = colOf.get(e.to)!;
-        if (si <= ti) continue;
-        const dy = Math.abs(centerY(e.from) - (entryY.get(`${e.from}→${e.to}`) ?? centerY(e.to)));
-        // связь внутри кластера «владелец+вынесенное» короткая — допускаем
-        // больший наклон, чтобы кластер оставался плотным
-        const fromKind = cards.get(e.from)?.kind;
-        const toKind = cards.get(e.to)?.kind;
-        const ownerEdge =
-          (fromKind === 'metric' && toKind === 'goal') ||
-          (fromKind === 'motivation' && toKind === 'subject');
-        const need = dy / (ownerEdge ? OWNER_SLOPE_MAX : SLOPE_MAX);
-        const have = spanDx(si, ti);
-        if (need > have) {
-          const deficit = need - have;
-          const spanned = si - ti;
-          for (let i = ti; i < si; i++) gaps[i]! += deficit / spanned;
-        }
-      }
+    // Величина отступа — одна на карту. От нижней границы растёт до тех пор,
+    // пока самой крутой связи не хватит горизонтальной длины (|Δy| ≤ Δx:
+    // соседние связи тогда не круче диагонали, вертикалей не бывает),
+    // но не выше потолка — карта не должна расползаться в пустоту.
+    let gap = COL_GAP;
+    for (const e of edges) {
+      if (!positions.has(e.from) || !positions.has(e.to)) continue;
+      const si = present.indexOf(cards.get(e.from)!.kind);
+      const ti = present.indexOf(cards.get(e.to)!.kind);
+      if (si <= ti) continue;
+      const dy = Math.abs(centerY(e.from) - (entryY.get(`${e.from}→${e.to}`) ?? centerY(e.to)));
+      const n = si - ti; // сколько зазоров перекрывает связь
+      let widths = 0;
+      for (let i = ti + 1; i < si; i++) widths += COLUMN_W[present[i]!];
+      const need = (dy - widths) / n; // зазор, дающий Δx ≥ Δy
+      gap = Math.max(gap, Math.min(need, COL_GAP_MAX));
     }
-    // кластер «владелец+вынесенное» не расходится шире потолка
-    for (let i = 0; i < gaps.length; i++) {
-      if (isOwnerGap(i)) gaps[i] = Math.min(gaps[i]!, OWNER_GAP_MAX);
-    }
+    layoutGap.value = gap;
     let x = PAGE_PAD;
     const colX = new Map<CardKind, number>();
-    present.forEach((column, i) => {
+    for (const column of present) {
       colX.set(column, x);
-      if (i < present.length - 1) x += COLUMN_W[column] + gaps[i]!;
-    });
+      x += COLUMN_W[column] + gap;
+    }
     for (const card of cards.values()) {
       const p = positions.get(card.id);
       if (!p) continue; // колонка ещё не размещена (ранние итерации)
@@ -574,17 +562,16 @@ export function computeLayout(map: HypothesisMap): Layout {
     }
   };
 
-  // --- Главная петля сходимости: Y-позиции ↔ точки входа ↔ ширины колонок ---
+  // --- Главная петля сходимости: Y-позиции ↔ точки входа ---
   // Размеры карточек жёсткие — по содержимому; кластеры «владелец+вынесенное»
-  // держатся вместе, пологость длинных стрелок обеспечивают якоря
-  // «источник на своей точке входа» и адаптивные зазоры колонок.
+  // держатся вместе. X от рёбер не зависит (единый отступ), поэтому считается
+  // один раз в самом конце, после расстановки всех колонок.
   placeGoals();
   placeSubjects();
   for (let i = 0; i < 4; i++) {
     assignEdges();
     placeGoals();
     placeSubjects();
-    computeX();
   }
   assignEdges();
 

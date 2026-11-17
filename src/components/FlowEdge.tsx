@@ -1,13 +1,14 @@
 import { BaseEdge } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
+import { layoutGap } from '../model/layout';
 
 /**
  * Стандартная стрелка карты: справа налево, вход в правую грань карточки.
  *
- * Короткие связи внутри кластера «владелец+вынесенное» (метрика→цель,
- * боль/желание→субъект) рисуются прямой диагональю — как на реальных досках:
- * при плотной упаковке кластера перепад высот невелик, а S-кривая на коротком
- * участке превращается в почти вертикальный хвост.
+ * Короткие связи соседних колонок (метрика→цель, боль/желание→субъект,
+ * субъект→метрика — по ширине одного межколоночного отступа) рисуются прямой
+ * диагональю — как на реальных досках: на коротком участке S-кривая
+ * превращается в почти вертикальный хвост.
  *
  * Остальные связи — плоская кубическая кривая с горизонтальными касательными
  * у концов: встроенная безье React Flow держит управляющие точки на половине
@@ -16,8 +17,6 @@ import type { EdgeProps } from '@xyflow/react';
  * больше среднего, вертикальных участков не бывает.
  */
 const FLAT_FRACTION = 0.18;
-/** До этой длины связь считается внутрикластерной и рисуется прямой. */
-const STRAIGHT_MAX_DX = 220;
 
 export function FlowEdge({
   sourceX,
@@ -28,8 +27,10 @@ export function FlowEdge({
   style,
 }: EdgeProps) {
   const dx = targetX - sourceX;
+  // связи соседних колонок (длиной до отступа + запас) — прямая диагональ
+  const straightMaxDx = layoutGap.value + 40;
   const path =
-    Math.abs(dx) < STRAIGHT_MAX_DX
+    Math.abs(dx) < straightMaxDx
       ? `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`
       : `M ${sourceX} ${sourceY} C ${sourceX + dx * FLAT_FRACTION} ${sourceY} ${
           targetX - dx * FLAT_FRACTION
