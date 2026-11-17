@@ -385,6 +385,16 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
       kind: 'flow' as const,
       level: m.influence,
     })),
+    // цель дочерней карты → своя задача: серая структурная стрелка
+    // (раскрытие масштабной задачи картой уровнем ниже; без приоритета)
+    ...map.tasks
+      .filter((t) => t.childMapId)
+      .map((t) => ({
+        from: `childgoal-${t.id}`,
+        to: t.id,
+        kind: 'flow' as const,
+        level: null,
+      })),
     ...map.blockers.map((b) => ({
       from: b.id,
       to: b.blocks,

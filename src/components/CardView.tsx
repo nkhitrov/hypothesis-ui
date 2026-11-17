@@ -6,7 +6,7 @@ import { CARD_PALETTE, PRIORITY_COLORS } from '../model/layout';
 
 export interface StickyNodeData extends Record<string, unknown> {
   card: CardNode;
-  /** Переход в дочернюю карту — кликом по плашке цели. */
+  /** Переход в дочернюю карту — кликом по карточке цели. */
   openMap?: (id: string) => void;
 }
 
@@ -37,7 +37,9 @@ export function CardView({ data }: NodeProps<StickyNode>) {
 
   return (
     <div
-      className={`card kind-${node.kind}${node.linkTo ? ' has-link' : ''}`}
+      // nopan: без него d3-zoom панели React Flow глотает реальные клики
+      // по содержимому узла — карточка цели не открывала дочернюю карту
+      className={`card kind-${node.kind}${node.linkTo ? ' has-link nopan' : ''}`}
       title={node.linkTo ? 'Открыть карту уровнем ниже' : undefined}
       style={{
         width: '100%',
