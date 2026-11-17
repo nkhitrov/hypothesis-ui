@@ -559,28 +559,13 @@ button {
 
 /* --- Проекты и переходы между картами --- */
 
-/* задача с дочерней картой: справа плашка цели дочерней карты,
-   клик по плашке открывает её (вся карточка не кликается) */
-.card .row.goal-link {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 4px;
-}
-
-.goal-chip {
-  display: inline-block;
-  max-width: 100%;
-  background: #cadf58;
-  border: 1px solid #a3b544;
-  border-radius: 6px;
-  padding: 3px 8px;
-  font-size: 14px;
+/* карточка цели дочерней карты (колонка справа от задач): клик открывает ту карту */
+.card.has-link {
   cursor: pointer;
-  text-align: left;
 }
 
-.goal-chip:hover {
-  filter: brightness(0.95);
+.card.has-link:hover {
+  filter: brightness(0.96);
 }
 
 /* кнопка «← назад» в топбаре */

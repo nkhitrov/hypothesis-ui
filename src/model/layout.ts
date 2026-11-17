@@ -25,6 +25,7 @@ export type CardKind =
   | 'motivation'
   | 'hypothesis'
   | 'task'
+  | 'childGoal'
   | 'blocker';
 export type EdgeKind = 'flow' | 'block';
 
@@ -94,6 +95,7 @@ const COLUMN_ORDER: CardKind[] = [
   'motivation',
   'hypothesis',
   'task',
+  'childGoal',
   'blocker',
 ];
 const COLUMN_W: Record<CardKind, number> = {
@@ -103,6 +105,7 @@ const COLUMN_W: Record<CardKind, number> = {
   motivation: 320,
   hypothesis: 350,
   task: 390,
+  childGoal: 340,
   blocker: 300,
 };
 const MIN_H: Partial<Record<CardKind, number>> = { goal: 340, task: 96 };
@@ -118,6 +121,7 @@ export const layoutGap = { value: COL_GAP };
 export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = {
   goal: { fill: '#cadf58', border: '#a3b544' },
   metric: { fill: '#cadf58', border: '#a3b544' },
+  childGoal: { fill: '#cadf58', border: '#a3b544' },
   subject: { fill: '#ffc831', border: '#d9a41f' },
   motivation: { fill: '#ffc831', border: '#d9a41f' },
   hypothesis: { fill: '#ffef73', border: '#d9c94a' },
@@ -303,18 +307,23 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   for (const t of map.tasks) {
     const c = new Card(t.id, 'task');
     c.add('', t.description, { boldText: true });
-    if (t.childMapId) {
-      // справа в карточке — цель дочерней карты (клик по плашке = переход);
-      // текст приходит из хранилища через opts.childGoals
-      c.linkTo = t.childMapId;
-      c.add('Цель:', opts?.childGoals?.[t.childMapId] ?? 'карта уровнем ниже не найдена', {
-        cls: 'goal-link',
-      });
-    }
     if (t.owner || t.due) {
       c.add('', `${t.owner ?? '—'}${t.due ? ` · до ${t.due}` : ''}`, { cls: 'muted' });
     }
     cards.set(t.id, c);
+  }
+
+  // --- Цели дочерних карт: отдельные карточки в колонке справа от задач
+  //     (масштабная задача раскрывается картой уровнем ниже — её цель стоит
+  //     рядом с задачей; клик по карточке цели открывает ту карту) ---
+  for (const t of map.tasks) {
+    if (!t.childMapId) continue;
+    const id = `childgoal-${t.id}`;
+    const c = new Card(id, 'childGoal');
+    c.linkTo = t.childMapId;
+    c.add('', 'Цель (карта ниже)', { boldText: true });
+    c.add('', opts?.childGoals?.[t.childMapId] ?? 'карта уровнем ниже не найдена');
+    cards.set(id, c);
   }
 
   // --- Блокеры ---
@@ -633,7 +642,14 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
     );
   }
 
-  // 7) блокеры — на полосе блокируемой задачи
+  // 7) цели дочерних карт — на полосе своей задачи (колонка справа от задач)
+  placeColumn(
+    map.tasks
+      .filter((t) => t.childMapId)
+      .map((t) => ({ ids: [`childgoal-${t.id}`], preferredCenter: centerY(t.id) })),
+  );
+
+  // 8) блокеры — на полосе блокируемой задачи
   {
     const groups = new Map<string, string[]>();
     for (const b of map.blockers) {

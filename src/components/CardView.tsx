@@ -37,13 +37,22 @@ export function CardView({ data }: NodeProps<StickyNode>) {
 
   return (
     <div
-      className={`card kind-${node.kind}`}
+      className={`card kind-${node.kind}${node.linkTo ? ' has-link' : ''}`}
+      title={node.linkTo ? 'Открыть карту уровнем ниже' : undefined}
       style={{
         width: '100%',
         minHeight: '100%',
         background: node.fill ?? palette.fill,
         ...(node.extraStyle ? styleFromExtra(node.extraStyle) : null),
       }}
+      onClick={
+        node.linkTo
+          ? (e) => {
+              e.stopPropagation();
+              openMap?.(node.linkTo!);
+            }
+          : undefined
+      }
     >
       <Handle type="source" position={Position.Left} id="s-left" style={HIDDEN_HANDLE} />
       <Handle
@@ -96,29 +105,12 @@ export function CardView({ data }: NodeProps<StickyNode>) {
         </span>
       )}
       <div className="body">
-        {node.rows.map((row, i) => {
-          const link = node.linkTo;
-          return row.cls === 'goal-link' && link ? (
-            <div key={i} className="row goal-link">
-              <span
-                className="goal-chip"
-                title={`Цель из карты уровнем ниже — клик открывает её (${link})`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openMap?.(link);
-                }}
-              >
-                <b>↳ {row.label ?? 'Цель'} </b>
-                <span>{row.text}</span>
-              </span>
-            </div>
-          ) : (
-            <div key={i} className={`row ${row.cls ?? ''}`}>
-              {row.label && <b>{row.label} </b>}
-              <span className={row.boldText ? 'bold' : undefined}>{row.text}</span>
-            </div>
-          );
-        })}
+        {node.rows.map((row, i) => (
+          <div key={i} className={`row ${row.cls ?? ''}`}>
+            {row.label && <b>{row.label} </b>}
+            <span className={row.boldText ? 'bold' : undefined}>{row.text}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
