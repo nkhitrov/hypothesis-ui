@@ -272,6 +272,23 @@ button {
   color: #494d43;
 }
 
+/* Рамка-группа (topology.md №10): прозрачный контейнер с пунктиром цвета
+   типа членов (цвет приходит из раскладки через border-color) */
+.card.kind-group {
+  padding: 14px 16px 0;
+  border: 2px dashed #b7b9b3;
+  background: transparent;
+  box-shadow: none;
+}
+
+.card.kind-group .row {
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5d6157;
+}
+
 .card .row {
   margin: 2px 0;
 }

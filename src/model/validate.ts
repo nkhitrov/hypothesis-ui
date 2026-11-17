@@ -28,7 +28,15 @@ const PART_NAMES: Record<'if' | 'then' | 'because' | 'so', string> = {
 
 type Entity = Record<string, unknown>;
 /** Тип сущности по id — для проверки, что ссылка ведёт на допустимый тип. */
-type Kind = 'цель' | 'метрика' | 'субъект' | 'мотивация' | 'гипотеза' | 'задача' | 'блокер';
+type Kind =
+  | 'цель'
+  | 'метрика'
+  | 'субъект'
+  | 'мотивация'
+  | 'гипотеза'
+  | 'задача'
+  | 'блокер'
+  | 'группа';
 
 const isObj = (v: unknown): v is Entity => typeof v === 'object' && v !== null;
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -91,7 +99,57 @@ export function validateMap(input: unknown): string[] {
   checkUnique('задача', tasks);
   checkUnique('блокер', blockers);
 
-  /** Ссылка обязана существовать И вести на допустимый тип сущности. */
+  // --- группы элементов (topology.md №10): рамка из однотипных элементов,
+  //     к которой идёт одна стрелка; связь с отдельным членом остаётся ---
+  const groups = Array.isArray(map.groups) ? (map.groups as unknown as Entity[]) : [];
+  checkUnique('группа', groups);
+  const GROUP_MEMBER_KINDS: readonly Kind[] = ['метрика', 'субъект', 'гипотеза', 'задача'];
+  const groupMembers = new Map<string, string[]>(); // группа → члены
+  const memberOf = new Map<string, string>(); // член → группа
+  const groupKind = new Map<string, Kind>(); // группа → тип её членов
+  for (const g of groups) {
+    const gid = isStr(g['id']) ? g['id'] : '?';
+    const members = g['members'];
+    if (!isStrArray(members)) {
+      errors.push(`группа '${gid}': 'members' должен быть списком id элементов`);
+      continue;
+    }
+    if (members.length === 0) {
+      errors.push(`группа '${gid}': пустая — укажите хотя бы один элемент`);
+      continue;
+    }
+    groupMembers.set(gid, members);
+    const kinds = new Set<Kind>();
+    for (const m of members) {
+      const kind = seen.get(m);
+      if (kind === undefined) {
+        errors.push(`группа '${gid}': член '${m}' не найден`);
+        continue;
+      }
+      if (!GROUP_MEMBER_KINDS.includes(kind)) {
+        errors.push(
+          `группа '${gid}': член '${m}' типа '${kind}' — группы составляются из метрик/субъектов/гипотез/задач (не из групп и не из целей)`,
+        );
+        continue;
+      }
+      kinds.add(kind);
+      const prev = memberOf.get(m);
+      if (prev !== undefined && prev !== gid) {
+        errors.push(`элемент '${m}' входит в две группы ('${prev}' и '${gid}')`);
+      } else {
+        memberOf.set(m, gid);
+      }
+    }
+    if (kinds.size > 1) {
+      errors.push(
+        `группа '${gid}': члены разных типов (${[...kinds].join(' / ')}) — группа должна быть однотипной`,
+      );
+    } else if (kinds.size === 1) {
+      groupKind.set(gid, [...kinds][0]!);
+    }
+  }
+  /** Ссылка обязана существовать И вести на допустимый тип сущности
+   *  (ссылка на группу допустима там, где допустим тип её членов). */
   const link = (id: unknown, what: string, allowed: readonly Kind[]): boolean => {
     if (!isStr(id) || id === '') {
       errors.push(`${what}: пустая ссылка`);
@@ -102,14 +160,49 @@ export function validateMap(input: unknown): string[] {
       errors.push(`${what}: ссылка на несуществующий id '${id}'`);
       return false;
     }
-    if (!allowed.includes(kind)) {
+    const effective = kind === 'группа' ? groupKind.get(id) : kind;
+    if (!effective || !allowed.includes(effective)) {
       errors.push(
-        `${what}: ссылка на '${id}' указывает на сущность типа '${kind}', а допускается только ${allowed.join(' / ')}`,
+        `${what}: ссылка на '${id}' указывает на сущность типа '${
+          kind === 'группа'
+            ? `группа с членами типа '${effective ?? 'смешанного'}'`
+            : kind
+        }', а допускается только ${allowed.join(' / ')}`,
       );
       return false;
     }
     return true;
   };
+
+  // члены группы метрик — метрики одной цели (рамка живёт в кластере цели)
+  for (const [gid, members] of groupMembers) {
+    if (groupKind.get(gid) !== 'метрика') continue;
+    const goalRefs = new Set(
+      members.map((m) => {
+        const found = separatedMetrics.find((x) => isStr(x['id']) && x['id'] === m);
+        return isStr(found?.['goalRef']) ? found['goalRef'] : '?';
+      }),
+    );
+    if (goalRefs.size > 1) {
+      errors.push(
+        `группа '${gid}': метрики разных целей (${[...goalRefs].join(', ')}) — сгруппируйте метрики одной цели`,
+      );
+    }
+  }
+  // члены группы субъектов — без вынесенной мотивации (она жила бы вне рамки)
+  for (const [gid, members] of groupMembers) {
+    if (groupKind.get(gid) !== 'субъект') continue;
+    for (const m of members) {
+      const mos = motivations
+        .filter((mo) => mo['subject'] === m && isStr(mo['id']))
+        .map((mo) => mo['id'] as string);
+      if (mos.length > 0) {
+        errors.push(
+          `группа '${gid}': у субъекта '${m}' вынесены боли/желания (${mos.join(', ')}) — группируйте субъектов без вынесенной мотивации`,
+        );
+      }
+    }
+  }
 
   // --- цели: убранные поля старой схемы ---
   for (const g of [goal, ...extraGoals]) {
@@ -186,6 +279,9 @@ export function validateMap(input: unknown): string[] {
 
   // --- субъекты ---
   const mainGoalId = isStr(goal['id']) ? goal['id'] : '';
+  /** Ссылки на метрики с развёрткой групп: группа метрик = все её члены. */
+  const expandMetricRefs = (refs: string[]): string[] =>
+    refs.flatMap((r) => (groupKind.get(r) === 'метрика' ? (groupMembers.get(r) ?? [r]) : [r]));
   for (const s of subjects) {
     const sid = isStr(s['id']) ? s['id'] : '?';
     if (!LEVELS.includes(s['influence'] as Level)) {
@@ -224,7 +320,7 @@ export function validateMap(input: unknown): string[] {
         .filter(Boolean);
       if (goalMetrics.length === 0) continue;
       const attached = isStrArray(metricRefs)
-        ? metricRefs.filter((mid) => goalMetrics.includes(mid))
+        ? expandMetricRefs(metricRefs).filter((mid) => goalMetrics.includes(mid))
         : [];
       if (attached.length === 0) {
         errors.push(
@@ -234,7 +330,7 @@ export function validateMap(input: unknown): string[] {
     }
     // метрики субъекта принадлежат только целям самого субъекта
     if (isStrArray(metricRefs)) {
-      for (const mid of metricRefs) {
+      for (const mid of expandMetricRefs(metricRefs)) {
         const m = separatedMetrics.find((x) => x['id'] === mid);
         if (m && isStr(m['goalRef']) && !goalIds.includes(m['goalRef'])) {
           errors.push(
@@ -350,6 +446,12 @@ export function validateMap(input: unknown): string[] {
     link(t['hypothesis'], `задача '${tid}'`, ['гипотеза']);
     if (t['group'] !== undefined && (!isStr(t['group']) || t['group'].trim() === '')) {
       errors.push(`задача '${tid}': 'group' должен быть непустым названием направления`);
+    }
+    const memberGroup = isStr(t['id']) ? memberOf.get(t['id']) : undefined;
+    if (memberGroup && t['group'] !== undefined) {
+      errors.push(
+        `задача '${tid}': член группы '${memberGroup}' не может иметь направление (task.group) — сгруппированные задачи живут в своей рамке`,
+      );
     }
     if (t['status'] !== undefined && !TASK_STATUSES.includes(t['status'] as TaskStatus)) {
       errors.push(
