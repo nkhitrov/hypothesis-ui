@@ -1,4 +1,4 @@
-import type { HypothesisMap, Level, MotivationKind } from '../types';
+import type { HypothesisMap, Level, MotivationKind, TaskStatus } from '../types';
 
 /**
  * Раскладка карты для React Flow: строго горизонтальная карта,
@@ -209,6 +209,14 @@ function wrapCount(text: string, maxChars: number): number {
 
 const MOTIVATION_LABEL: Record<MotivationKind, string> = { pain: 'Боль', wish: 'Желание' };
 
+/** Статус исполнения задачи (доска задач, topology.md №8): только исполнение,
+ *  не решение о ресурсе и не результат проверки гипотезы. */
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: 'Не начата',
+  'in-progress': 'В работе',
+  done: 'Готова',
+};
+
 /** Группа карточек колонки с предпочтительной позицией (центр полосы). */
 interface Stack {
   ids: string[];
@@ -338,13 +346,16 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
     cards.set(h.id, c);
   }
 
-  // --- Задачи-полосы ---
+  // --- Задачи-полосы: статус исполнения — словами в приглушённой строке ---
   for (const t of map.tasks) {
     const c = new Card(t.id, 'task');
     c.add('', t.description, { boldText: true });
-    if (t.owner || t.due) {
-      c.add('', `${t.owner ?? '—'}${t.due ? ` · до ${t.due}` : ''}`, { cls: 'muted' });
-    }
+    const meta = [
+      t.status ? TASK_STATUS_LABEL[t.status] : null,
+      t.owner ?? null,
+      t.due ? `до ${t.due}` : null,
+    ].filter(Boolean);
+    if (meta.length > 0) c.add('', meta.join(' · '), { cls: 'muted' });
     cards.set(t.id, c);
   }
 

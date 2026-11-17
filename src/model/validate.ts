@@ -1,4 +1,10 @@
-import type { HypothesisMap, Level, HypothesisStatus, MotivationKind } from '../types';
+import type {
+  HypothesisMap,
+  Level,
+  HypothesisStatus,
+  MotivationKind,
+  TaskStatus,
+} from '../types';
 
 /**
  * Правила целостности карты по стандарту 1.2 (см. docs/knowledge-base и
@@ -11,6 +17,7 @@ import type { HypothesisMap, Level, HypothesisStatus, MotivationKind } from '../
 const LEVELS: readonly Level[] = ['low', 'medium', 'high'];
 const STATUSES: readonly HypothesisStatus[] = ['draft', 'to-verify', 'confirmed', 'refuted'];
 const MOTIVATION_KINDS: readonly MotivationKind[] = ['pain', 'wish'];
+const TASK_STATUSES: readonly TaskStatus[] = ['todo', 'in-progress', 'done'];
 
 const PART_NAMES: Record<'if' | 'then' | 'because' | 'so', string> = {
   if: 'Если',
@@ -343,6 +350,11 @@ export function validateMap(input: unknown): string[] {
     link(t['hypothesis'], `задача '${tid}'`, ['гипотеза']);
     if (t['group'] !== undefined && (!isStr(t['group']) || t['group'].trim() === '')) {
       errors.push(`задача '${tid}': 'group' должен быть непустым названием направления`);
+    }
+    if (t['status'] !== undefined && !TASK_STATUSES.includes(t['status'] as TaskStatus)) {
+      errors.push(
+        `задача '${tid}': недопустимый статус исполнения '${String(t['status'])}' (${TASK_STATUSES.join('|')})`,
+      );
     }
   }
 

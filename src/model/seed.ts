@@ -335,6 +335,7 @@ const SMENNSY_MAP: HypothesisMap = {
   tasks: [
     {
       id: 'task-demo-script',
+      status: 'in-progress',
       group: 'Продукт',
       hypothesis: 'hyp-live-demo',
       description: 'Собрать сценарий демо на смене партнёра',
@@ -360,6 +361,7 @@ const SMENNSY_MAP: HypothesisMap = {
     },
     {
       id: 'task-dpa-template',
+      status: 'in-progress',
       group: 'Юридическое',
       hypothesis: 'hyp-dpa',
       description: 'Подготовить шаблон DPA с юристами',
@@ -368,6 +370,7 @@ const SMENNSY_MAP: HypothesisMap = {
     },
     {
       id: 'task-onprem-pilot',
+      status: 'done',
       group: 'Внедрение',
       hypothesis: 'hyp-onprem',
       description: 'Провести on-prem пилот на одном производстве',

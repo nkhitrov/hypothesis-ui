@@ -31,13 +31,14 @@ import {
 import { validateMap } from './model/validate';
 import { InvalidMapScreen } from './components/InvalidMapScreen';
 import { MapView } from './components/MapView';
+import { TasksBoardView } from './components/TasksBoardView';
 import { Sidebar } from './components/Sidebar';
 import { TextEditor } from './components/TextEditor';
 import { ImportDialog, type ImportPayload } from './components/ImportDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import type { Viewport } from '@xyflow/react';
 
-type View = 'board' | 'editor';
+type View = 'board' | 'tasks' | 'editor';
 
 /** Пройденный путь переходов «задача → дочерняя карта» (для кнопки «← назад»). */
 interface NavEntry {
@@ -410,14 +411,31 @@ export default function App() {
         >
           ↓ Проект
         </button>
-        {view === 'board' ? (
-          <button className="btn primary" onClick={() => setView('editor')}>
-            Модель как текст
-          </button>
-        ) : (
+        {view === 'editor' ? (
           <button className="btn" onClick={() => setView('board')}>
             К карте
           </button>
+        ) : (
+          <>
+            <div className="view-switch" role="group" aria-label="Вид карты">
+              <button
+                className={view === 'board' ? 'seg active' : 'seg'}
+                onClick={() => setView('board')}
+              >
+                Карта
+              </button>
+              <button
+                className={view === 'tasks' ? 'seg active' : 'seg'}
+                onClick={() => setView('tasks')}
+                title="Доска задач: статусы исполнения, задачи привязаны к гипотезам по горизонтали"
+              >
+                Задачи
+              </button>
+            </div>
+            <button className="btn primary" onClick={() => setView('editor')}>
+              Модель как текст
+            </button>
+          </>
         )}
       </div>
 
@@ -475,6 +493,16 @@ export default function App() {
               onOpenMap={openChildMap}
               onViewportSave={rememberViewport}
             />
+          )
+        ) : view === 'tasks' ? (
+          validationErrors.length > 0 ? (
+            <InvalidMapScreen
+              errors={validationErrors}
+              onFix={() => setView('editor')}
+              onOpenList={() => setSidebarOpen(true)}
+            />
+          ) : (
+            <TasksBoardView map={map} />
           )
         ) : (
           <TextEditor
