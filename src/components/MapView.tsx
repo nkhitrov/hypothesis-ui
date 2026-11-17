@@ -16,7 +16,9 @@ import { FlowEdge } from './FlowEdge';
 
 interface Props {
   map: HypothesisMap;
-  /** Переход в дочернюю карту: клик по задаче с task.childMapId. */
+  /** Тексты целей дочерних карт (childMapId → описание цели) — для плашек. */
+  childGoals?: Record<string, string>;
+  /** Переход в дочернюю карту: клик по плашке цели на задаче. */
   onOpenMap?: (id: string) => void;
 }
 
@@ -25,14 +27,14 @@ const edgeTypes = { flow: FlowEdge };
 
 /** Доска на React Flow: карточки-узлы и строго горизонтальные стрелки
  *  (плавные кривые справа налево, вход в правую грань). Без анимаций. */
-export function MapView({ map, onOpenMap }: Props) {
+export function MapView({ map, childGoals, onOpenMap }: Props) {
   const { nodes, edges } = useMemo(() => {
-    const layout = computeLayout(map);
+    const layout = computeLayout(map, { childGoals });
     const rfNodes: Node<StickyNodeData>[] = layout.cards.map((c) => ({
       id: c.id,
       type: 'sticky',
       position: { x: c.x, y: c.y },
-      data: { card: c },
+      data: { card: c, openMap: onOpenMap },
       // размеры узла = размеры карточки из раскладки: обёртка RF обязана
       // совпадать с видимой карточкой, иначе хэндлы и рёбра разъедутся
       style: { width: c.w, height: c.h },
@@ -62,7 +64,8 @@ export function MapView({ map, onOpenMap }: Props) {
       };
     });
     return { nodes: rfNodes, edges: rfEdges };
-  }, [map]);
+    // onOpenMap в зависимостях: колбэк замыкает текущую карту (кнопка «← назад»)
+  }, [map, childGoals, onOpenMap]);
 
   return (
     <div className="board-flow">
@@ -79,10 +82,6 @@ export function MapView({ map, onOpenMap }: Props) {
         nodesConnectable={false}
         elementsSelectable={false}
         edgesFocusable={false}
-        onNodeClick={(_, node) => {
-          const link = (node.data as StickyNodeData).card.linkTo;
-          if (link) onOpenMap?.(link);
-        }}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.3} color="#d9d9d9" />

@@ -82,6 +82,17 @@ export default function App() {
   /** Валидная карта — условие рендера: при ошибках доска не отрисовывается. */
   const validationErrors = useMemo(() => validateMap(map), [map]);
 
+  /** Цели дочерних карт (childMapId → описание цели) — для плашек на задачах. */
+  const childGoals = useMemo(() => {
+    const goals: Record<string, string> = {};
+    for (const t of map.tasks) {
+      if (t.childMapId && !(t.childMapId in goals)) {
+        goals[t.childMapId] = loadMap(t.childMapId)?.goal.description ?? '';
+      }
+    }
+    return goals;
+  }, [map]);
+
   const notify = (message: string): void => {
     setFlash(message);
     window.setTimeout(() => setFlash(null), 2500);
@@ -449,7 +460,7 @@ export default function App() {
               onOpenList={() => setSidebarOpen(true)}
             />
           ) : (
-            <MapView map={map} onOpenMap={openChildMap} />
+            <MapView map={map} childGoals={childGoals} onOpenMap={openChildMap} />
           )
         ) : (
           <TextEditor

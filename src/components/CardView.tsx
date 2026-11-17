@@ -6,6 +6,8 @@ import { CARD_PALETTE, PRIORITY_COLORS } from '../model/layout';
 
 export interface StickyNodeData extends Record<string, unknown> {
   card: CardNode;
+  /** Переход в дочернюю карту — кликом по плашке цели. */
+  openMap?: (id: string) => void;
 }
 
 export type StickyNode = Node<StickyNodeData, 'sticky'>;
@@ -27,6 +29,7 @@ const HIDDEN_HANDLE: CSSProperties = {
 export function CardView({ data }: NodeProps<StickyNode>) {
   const node = data.card;
   const palette = CARD_PALETTE[node.kind];
+  const openMap = data.openMap;
   // квадратик цифры ~1/9 высоты карточки; примыкает ПРАВОЙ гранью к левой
   // грани карточки (в углу, сбоку, не налезая на карточку)
   const badgeSize = Math.max(34, Math.min(60, Math.round(node.h / 9)));
@@ -34,8 +37,7 @@ export function CardView({ data }: NodeProps<StickyNode>) {
 
   return (
     <div
-      className={`card kind-${node.kind}${node.linkTo ? ' has-link' : ''}`}
-      title={node.linkTo ? 'Открыть карту уровнем ниже' : undefined}
+      className={`card kind-${node.kind}`}
       style={{
         width: '100%',
         minHeight: '100%',
@@ -94,12 +96,29 @@ export function CardView({ data }: NodeProps<StickyNode>) {
         </span>
       )}
       <div className="body">
-        {node.rows.map((row, i) => (
-          <div key={i} className={`row ${row.cls ?? ''}`}>
-            {row.label && <b>{row.label} </b>}
-            <span className={row.boldText ? 'bold' : undefined}>{row.text}</span>
-          </div>
-        ))}
+        {node.rows.map((row, i) => {
+          const link = node.linkTo;
+          return row.cls === 'goal-link' && link ? (
+            <div key={i} className="row goal-link">
+              <span
+                className="goal-chip"
+                title={`Цель из карты уровнем ниже — клик открывает её (${link})`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openMap?.(link);
+                }}
+              >
+                <b>↳ {row.label ?? 'Цель'} </b>
+                <span>{row.text}</span>
+              </span>
+            </div>
+          ) : (
+            <div key={i} className={`row ${row.cls ?? ''}`}>
+              {row.label && <b>{row.label} </b>}
+              <span className={row.boldText ? 'bold' : undefined}>{row.text}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

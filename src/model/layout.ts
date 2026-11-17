@@ -203,7 +203,7 @@ interface Stack {
   preferredCenter: number;
 }
 
-export function computeLayout(map: HypothesisMap): Layout {
+export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<string, string> }): Layout {
   const cards = new Map<string, Card>();
 
   // --- Цели: метрики внутри карточки (классическая топология) ---
@@ -304,8 +304,12 @@ export function computeLayout(map: HypothesisMap): Layout {
     const c = new Card(t.id, 'task');
     c.add('', t.description, { boldText: true });
     if (t.childMapId) {
+      // справа в карточке — цель дочерней карты (клик по плашке = переход);
+      // текст приходит из хранилища через opts.childGoals
       c.linkTo = t.childMapId;
-      c.add('', '↳ раскрыта в карту уровнем ниже →', { cls: 'muted link' });
+      c.add('Цель:', opts?.childGoals?.[t.childMapId] ?? 'карта уровнем ниже не найдена', {
+        cls: 'goal-link',
+      });
     }
     if (t.owner || t.due) {
       c.add('', `${t.owner ?? '—'}${t.due ? ` · до ${t.due}` : ''}`, { cls: 'muted' });
