@@ -263,10 +263,12 @@ export function validateMap(input: unknown): string[] {
         );
       }
     }
+    // метрики влияния могут быть ещё не выбраны (карта на раннем этапе —
+    // на доске плашка «Нужно заполнить»); заданные ссылки валидируются
     const hypMetrics = h['metrics'];
-    if (!isStrArray(hypMetrics) || hypMetrics.length === 0) {
-      errors.push(`гипотеза '${hid}': не указана ни одна метрика влияния`);
-    } else {
+    if (hypMetrics !== undefined && !isStrArray(hypMetrics)) {
+      errors.push(`гипотеза '${hid}': 'metrics' должен быть списком id метрик`);
+    } else if (isStrArray(hypMetrics)) {
       for (const mid of hypMetrics) link(mid, `гипотеза '${hid}' (метрика)`, ['метрика']);
     }
     if (!STATUSES.includes(h['status'] as HypothesisStatus)) {
