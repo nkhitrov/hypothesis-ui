@@ -777,6 +777,104 @@ const GOAL_HIERARCHY_MAP: HypothesisMap = {
   blockers: [],
 };
 
+/** Топология «группировка элементов» (topology.md №10) по схеме из базы
+ *  знаний: группа из трёх субъектов, верхняя гипотеза воздействует на всю
+ *  группу (одна стрелка в рамку), нижняя — на конкретного субъекта. */
+const ELEMENT_GROUPS_MAP: HypothesisMap = {
+  schemaVersion: 1,
+  meta: {
+    title: 'Демо: Группировка элементов (группа субъектов)',
+    version: 1,
+    date: '2026-11-17',
+  },
+  goal: {
+    id: 'goal-nps',
+    description: 'Клиенты рекомендуют банк друзьям и семье',
+    metrics: [
+      {
+        id: 'metric-nps',
+        description: 'NPS розничного блока',
+        current: '17',
+        target: '40',
+      },
+    ],
+  },
+  subjects: [
+    {
+      id: 'subject-vip-senior',
+      description: 'Вип-клиент предпенсионного возраста',
+      influence: 'high',
+      pains: ['Боится потерять накопления из-за инфляции'],
+    },
+    {
+      id: 'subject-vip-heir',
+      description: 'Наследник семейного капитала',
+      influence: 'medium',
+      wishes: ['Хочет понимать, куда инвестирует семья'],
+    },
+    {
+      id: 'subject-vip-founder',
+      description: 'Основатель бизнеса, клиент private banking',
+      influence: 'high',
+      wishes: ['Хочет персональный сервис без очередей'],
+    },
+    {
+      id: 'subject-smb',
+      description: 'ИП, ведущий счёт в розничном отделении',
+      influence: 'low',
+      pains: ['Тяжело платить контрагентам из чужого банка'],
+    },
+  ],
+  hypotheses: [
+    {
+      id: 'hyp-vip-all',
+      target: 'grp-vip',
+      metrics: ['metric-nps'],
+      influence: 'high',
+      cost: 'medium',
+      status: 'to-verify',
+      if: 'Если ввести персональные встречи с клиентским директором для всего премиум-сегмента,',
+      then: 'ВИП-клиенты начинают рекомендовать банк своему кругу,',
+      because: 'их статус подчёркнут сервисом, о котором есть что рассказать,',
+      so: 'тогда NPS розничного блока растёт.',
+    },
+    {
+      id: 'hyp-vip-heir',
+      target: 'subject-vip-heir',
+      metrics: ['metric-nps'],
+      influence: 'medium',
+      cost: 'low',
+      status: 'draft',
+      if: 'Если выпустить семейный отчёт о структуре капитала простым языком,',
+      then: 'наследники разбираются в активах и остаются в банке,',
+      because: 'сегодня им непонятно, куда инвестирует семья, и это отталкивает,',
+      so: 'тогда их рекомендации прибавляют к NPS.',
+    },
+  ],
+  groups: [
+    {
+      id: 'grp-vip',
+      description: 'Премиум-сегмент',
+      members: ['subject-vip-senior', 'subject-vip-heir', 'subject-vip-founder'],
+    },
+  ],
+  tasks: [
+    {
+      id: 'task-pa-meetings',
+      hypothesis: 'hyp-vip-all',
+      description: 'Пилот персональных встреч в 3 отделениях',
+      owner: 'Премиум',
+    },
+    {
+      id: 'task-family-report',
+      hypothesis: 'hyp-vip-heir',
+      description: 'Макет семейного отчёта и тест с 5 клиентами',
+      owner: 'Продукт',
+    },
+  ],
+  blockers: [],
+};
+
 /** Демо-карты первого запуска; основная — «Гончар» (пример из базы знаний). */
 export const DEMO_MAPS: Array<{ id: string; map: HypothesisMap }> = [
   { id: 'demo-gonchar', map: GONCHAR_MAP },
@@ -785,4 +883,5 @@ export const DEMO_MAPS: Array<{ id: string; map: HypothesisMap }> = [
   { id: 'demo-multi-goals', map: MULTI_GOALS_MAP },
   { id: 'demo-metrics-level', map: METRICS_LEVEL_MAP },
   { id: 'demo-goal-hierarchy', map: GOAL_HIERARCHY_MAP },
+  { id: 'demo-element-groups', map: ELEMENT_GROUPS_MAP },
 ];

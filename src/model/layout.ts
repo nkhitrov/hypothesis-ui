@@ -30,6 +30,9 @@ export type CardKind =
   /** Нейтральная плашка-метка направления (task.group) — не карточка-задача,
    *  стоит в колонке задач над группой (topology.md №7). */
   | 'taskLabel'
+  /** Рамка-контейнер группы однотипных элементов (topology.md №10): члены
+   *  внутри, одна стрелка входит в правую грань рамки. */
+  | 'group'
   | 'childGoal'
   | 'blocker';
 export type EdgeKind = 'flow' | 'block';
@@ -111,6 +114,7 @@ const COLUMN_W: Record<CardKind, number> = {
   hypothesis: 350,
   task: 390,
   taskLabel: 390,
+  group: 0, // ширина рамки-группы задаётся явной (explicitW по типу членов)
   childGoal: 340,
   blocker: 300,
 };
@@ -134,6 +138,7 @@ export const CARD_PALETTE: Record<CardKind, { fill: string; border: string }> = 
   hypothesis: { fill: '#ffef73', border: '#d9c94a' },
   task: { fill: '#a6cdff', border: '#84a5d6' },
   taskLabel: { fill: '#f4f4f2', border: '#c9cbc4' },
+  group: { fill: 'transparent', border: '#b7b9b3' }, // цвет рамки — по типу членов
   blocker: { fill: '#ffa391', border: '#d98070' },
 };
 
@@ -167,6 +172,9 @@ class Card {
   extraStyle?: string;
   linkTo?: string;
   incomingRight = 0;
+  /** Явные размеры (рамка-группа: ширина по типу членов, высота по членам). */
+  explicitW?: number;
+  explicitH?: number;
 
   constructor(
     readonly id: string,
@@ -174,13 +182,14 @@ class Card {
   ) {}
 
   get w(): number {
-    return COLUMN_W[this.kind];
+    return this.explicitW ?? COLUMN_W[this.kind];
   }
   get pad(): number {
     return this.kind === 'task' || this.kind === 'taskLabel' ? TASK_PAD : PAD;
   }
   /** Высота — строго по содержимому (описание + строки), как в стандарте. */
   get height(): number {
+    if (this.explicitH !== undefined) return this.explicitH;
     const h = 2 * this.pad + this.lineCount * LINE_H + (this.rows.length - 1) * 4;
     return Math.max(MIN_H[this.kind] ?? 0, h);
   }
@@ -399,6 +408,36 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
     cards.set(b.id, c);
   }
 
+  // --- Рамки-группы (topology.md №10): прозрачный контейнер с пунктирной
+  //     рамкой цвета типа членов; члены — обычные карточки ВНУТРИ рамки,
+  //     стрелка «в группу» входит в правую грань рамки ---
+  const kindOfMember = (id: string): CardKind | null => {
+    if ((map.metrics ?? []).some((m) => m.id === id)) return 'metric';
+    if (map.subjects.some((s) => s.id === id)) return 'subject';
+    if (map.hypotheses.some((h) => h.id === id)) return 'hypothesis';
+    if (map.tasks.some((t) => t.id === id)) return 'task';
+    return null;
+  };
+  const GROUP_PAD_X = 14;
+  const GROUP_HEAD = 52; // верхний отступ + заголовок рамки + зазор до членов
+  const groupFrameOf = new Map<string, string>(); // член → рамка
+  const frameBase = new Map<string, CardKind>(); // рамка → тип (колонка) членов
+  for (const g of map.groups ?? []) {
+    const base = g.members.map(kindOfMember).find((k): k is CardKind => k !== null);
+    if (!base) continue; // невалидная группа — на доске её нет (шиэт валидации)
+    frameBase.set(g.id, base);
+    for (const m of g.members) groupFrameOf.set(m, g.id);
+    const frame = new Card(g.id, 'group');
+    frame.add('', g.description || 'Группа', { boldText: true });
+    frame.explicitW = COLUMN_W[base] + 2 * GROUP_PAD_X;
+    const membersH =
+      g.members.reduce((acc, m) => acc + (cards.get(m)?.height ?? 0), 0) +
+      (g.members.length - 1) * INNER_GAP;
+    frame.explicitH = GROUP_HEAD + membersH + GROUP_PAD_X;
+    frame.extraStyle = `border-color:${CARD_PALETTE[base].border}`;
+    cards.set(g.id, frame);
+  }
+
   // --- Связи (по стандарту 1.2; рендерер рисует только эти типы) ---
   interface RawEdge {
     from: string;
@@ -537,7 +576,21 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   // чтобы стрелки не пересекались между собой; вход — всегда правая грань.
   const edges: EdgeNode[] = [];
   const entryY = new Map<string, number>(); // «from→to» → Y точки входа
+  /** Члены групп — внутри своих рамок (по позициям рамок). */
+  const placeGroupMembers = (): void => {
+    for (const g of map.groups ?? []) {
+      const fp = positions.get(g.id);
+      if (!fp) continue;
+      let y = fp.y + GROUP_HEAD;
+      for (const m of g.members) {
+        if (!cards.has(m)) continue;
+        positions.set(m, { x: 0, y });
+        y += height(m) + INNER_GAP;
+      }
+    }
+  };
   const assignEdges = (): void => {
+    placeGroupMembers();
     edges.length = 0;
     entryY.clear();
     const incoming = new Map<string, RawEdge[]>();
@@ -572,17 +625,27 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   //    её метрики — плотным ровным стеком на той же полосе; соседние кластеры
   //    расходятся так, чтобы чужие метрики не попадали в полосу соседней цели.
   //    Корневые цели (глубина 0) раскладываются последовательными кластерами
-  //    сверху вниз; под-цели (1b) якорятся на полосу своего родителя
+  //    сверху вниз; под-цели (1b) якорятся на полосу своего родителя.
+  //    Сгруппированные метрики представлены в стеке рамкой группы
   const metricOf = new Map<string, string[]>();
   for (const m of map.metrics ?? []) {
     const list = metricOf.get(m.goalRef) ?? [];
     list.push(m.id);
     metricOf.set(m.goalRef, list);
   }
+  /** Стек полосы цели: метрики, сгруппированные — одной рамкой (без дублей). */
+  const clusterIdsOf = (goalId: string): string[] => {
+    const ids: string[] = [];
+    for (const mid of metricOf.get(goalId) ?? []) {
+      const id = groupFrameOf.get(mid) ?? mid;
+      if (!ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  };
   const placeRootGoals = (): void => {
     let prevBottom = -Infinity;
     for (const g of allGoals.filter((x) => (goalDepth.get(x.id) ?? 0) === 0)) {
-      const mids = metricOf.get(g.id) ?? [];
+      const mids = clusterIdsOf(g.id);
       const stackH = mids.length
         ? mids.reduce((acc, id) => acc + height(id), 0) + (mids.length - 1) * INNER_GAP
         : 0;
@@ -610,7 +673,7 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
       if (level.length === 0) continue;
       placeColumn(
         level.map((g) => ({
-          ids: [g.id, ...(metricOf.get(g.id) ?? [])],
+          ids: [g.id, ...clusterIdsOf(g.id)],
           preferredCenter: entryY.get(`${g.id}→${g.parent}`) ?? centerY(g.parent!),
         })),
       );
@@ -620,28 +683,45 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   // 2) субъекты с вынесенной мотивацией — единые вертикальные блоки:
   //    субъект стоит в середине полосы, его боли/желания — плотным стеком
   //    на той же полосе (кластер держится вместе, стрелки короткие).
-  //    Якорь блока — средняя точка входа субъекта (метрики или цель)
+  //    Якорь блока — средняя точка входа субъекта (метрики или цель).
+  //    Сгруппированные субъекты живут в рамке группы: рамка встаёт в общий
+  //    поток полос с якорем — средним по всем членам
+  const anchorOfSubject = (s: typeof map.subjects[number]): number => {
+    const targets = (s.metrics && s.metrics.length > 0 ? s.metrics : goalIdsOf(s)).filter(
+      (tid) => cards.has(tid),
+    );
+    const anchors = targets.map((tid) => entryY.get(`${s.id}→${tid}`) ?? centerY(tid));
+    return anchors.length ? average(anchors) : PAGE_PAD;
+  };
   const placeSubjects = (): void => {
     const units = map.subjects
+      .filter((s) => !groupFrameOf.has(s.id))
       .map((s) => {
-        const targets = (s.metrics && s.metrics.length > 0 ? s.metrics : goalIdsOf(s))
-          .filter((tid) => cards.has(tid));
-        const anchors = targets.map(
-          (tid) => entryY.get(`${s.id}→${tid}`) ?? centerY(tid),
-        );
         const mos = (map.motivations ?? []).filter((mo) => mo.subject === s.id);
         const moStackH = mos.length
           ? mos.reduce((acc, mo) => acc + height(mo.id), 0) + (mos.length - 1) * INNER_GAP
           : 0;
         return {
-          s,
+          anchorId: s.id,
           mos,
           moStackH,
           unitH: Math.max(height(s.id), moStackH),
-          preferred: anchors.length ? average(anchors) : PAGE_PAD,
+          preferred: anchorOfSubject(s),
         };
-      })
-      .sort((a, b) => a.preferred - b.preferred);
+      });
+    for (const g of map.groups ?? []) {
+      if (frameBase.get(g.id) !== 'subject') continue;
+      const members = map.subjects.filter((s) => g.members.includes(s.id));
+      if (members.length === 0) continue;
+      units.push({
+        anchorId: g.id,
+        mos: [],
+        moStackH: 0,
+        unitH: height(g.id),
+        preferred: average(members.map(anchorOfSubject)),
+      });
+    }
+    units.sort((a, b) => a.preferred - b.preferred);
     let prevBottom = -Infinity;
     for (const u of units) {
       const top = Math.max(
@@ -649,7 +729,7 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
         u.preferred - u.unitH / 2,
         Number.isFinite(prevBottom) ? prevBottom + GAP_Y : PAGE_PAD,
       );
-      positions.set(u.s.id, { x: 0, y: top + (u.unitH - height(u.s.id)) / 2 });
+      positions.set(u.anchorId, { x: 0, y: top + (u.unitH - height(u.anchorId)) / 2 });
       let y = top + (u.unitH - u.moStackH) / 2;
       for (const mo of u.mos) {
         positions.set(mo.id, { x: 0, y });
@@ -673,7 +753,9 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
         ? `goal-${goalDepth.get(card.id) ?? 0}`
         : card.kind === 'taskLabel'
           ? 'task'
-          : card.kind,
+          : card.kind === 'group'
+            ? frameBase.get(card.id)!
+            : card.kind,
     );
   }
   const columnRank = (key: string): number =>
@@ -713,6 +795,11 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
       if (!p) continue; // колонка ещё не размещена (ранние итерации)
       positions.set(card.id, { x: colX.get(columnOf.get(card.id)!)!, y: p.y });
     }
+    // рамки-группы обнимают свою колонку с двух сторон (члены — по колонке)
+    for (const g of map.groups ?? []) {
+      const p = positions.get(g.id);
+      if (p) positions.set(g.id, { x: p.x - GROUP_PAD_X, y: p.y });
+    }
   };
 
   // --- Главная петля сходимости: Y-позиции ↔ точки входа ---
@@ -732,30 +819,47 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
 
   // 4) боли/желания уже размещены блоками вместе с субъектами (см. placeSubjects)
 
-  // 5) гипотезы — группами на полосе своей цели воздействия
+  // 5) гипотезы — группами на полосе своей цели воздействия;
+  //    сгруппированные гипотезы живут в рамке (рамка — на средней полосе
+  //    целей воздействия всех членов)
   const hypGroups = new Map<string, string[]>();
   for (const h of map.hypotheses) {
+    if (groupFrameOf.has(h.id)) continue;
     const list = hypGroups.get(h.target) ?? [];
     list.push(h.id);
     hypGroups.set(h.target, list);
   }
-  placeColumn(
-    [...hypGroups.entries()].map(([target, ids]) => ({
+  placeColumn([
+    ...[...hypGroups.entries()].map(([target, ids]) => ({
       ids: sortIdsByPriority(ids, map),
       preferredCenter: centerY(target),
     })),
-  );
+    ...(map.groups ?? [])
+      .filter((g) => frameBase.get(g.id) === 'hypothesis')
+      .map((g) => {
+        const targets = map.hypotheses
+          .filter((h) => g.members.includes(h.id))
+          .map((h) => h.target);
+        return {
+          ids: [g.id],
+          preferredCenter: average(
+            targets.map((tid) => (cards.has(tid) ? centerY(tid) : PAGE_PAD)),
+          ),
+        };
+      }),
+  ]);
 
   // 6) задачи — на полосе своей гипотезы; при разбивке по направлениям
   //    (task.group) задачи одного направления идут одним блоком под плашкой,
-  //    блок центрируется на средней полосе гипотез своих задач
+  //    блок центрируется на средней полосе гипотез своих задач;
+  //    сгруппированные задачи живут в рамке (не в направлении)
   {
     const hypothesisOf = (tid: string): string =>
       map.tasks.find((t) => t.id === tid)!.hypothesis;
     const stacks: Stack[] = [];
     const byHyp = new Map<string, string[]>();
     for (const t of map.tasks) {
-      if (t.group?.trim()) continue;
+      if (t.group?.trim() || groupFrameOf.has(t.id)) continue;
       const list = byHyp.get(t.hypothesis) ?? [];
       list.push(t.id);
       byHyp.set(t.hypothesis, list);
@@ -771,6 +875,15 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
       stacks.push({
         ids: [`tasklabel-${g}`, ...sorted],
         preferredCenter: average(ids.map((id) => centerY(hypothesisOf(id)))),
+      });
+    }
+    for (const g of map.groups ?? []) {
+      if (frameBase.get(g.id) !== 'task') continue;
+      const members = map.tasks.filter((t) => g.members.includes(t.id));
+      if (members.length === 0) continue;
+      stacks.push({
+        ids: [g.id],
+        preferredCenter: average(members.map((t) => centerY(t.hypothesis))),
       });
     }
     placeColumn(stacks);
@@ -802,24 +915,27 @@ export function computeLayout(map: HypothesisMap, opts?: { childGoals?: Record<s
   assignEdges();
   computeX();
 
-  const nodes: CardNode[] = [...cards.entries()].map(([id, card]) => {
-    const pos = positions.get(id)!;
-    return {
-      id,
-      kind: card.kind,
-      x: pos.x,
-      y: pos.y,
-      w: card.w,
-      h: card.height,
-      rows: card.rows,
-      priority: card.priority,
-      cost: card.cost,
-      incomingRight: card.incomingRight,
-      fill: card.fill,
-      extraStyle: card.extraStyle,
-      linkTo: card.linkTo,
-    };
-  });
+  // рамки-группы — первыми в массиве узлов: рендерятся ПОД карточками членов
+  const nodes: CardNode[] = [...cards.values()]
+    .sort((a, b) => (a.kind === 'group' ? 0 : 1) - (b.kind === 'group' ? 0 : 1))
+    .map((card) => {
+      const pos = positions.get(card.id)!;
+      return {
+        id: card.id,
+        kind: card.kind,
+        x: pos.x,
+        y: pos.y,
+        w: card.w,
+        h: card.height,
+        rows: card.rows,
+        priority: card.priority,
+        cost: card.cost,
+        incomingRight: card.incomingRight,
+        fill: card.fill,
+        extraStyle: card.extraStyle,
+        linkTo: card.linkTo,
+      };
+    });
 
   return { cards: nodes, edges };
 }

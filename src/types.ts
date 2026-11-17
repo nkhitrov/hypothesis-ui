@@ -122,6 +122,17 @@ export interface Blocker {
   due?: string;
 }
 
+/** Топология «группировка элементов» (topology.md №10): группа однотипных
+ *  элементов (метрики, субъекты, гипотезы или задачи), к которой можно
+ *  присоединить одну стрелку вместо нескольких; связь с отдельным элементом
+ *  группы остаётся возможной. */
+export interface ElementGroup {
+  id: string;
+  description: string;
+  /** id однотипных членов (метрики/субъекты/гипотезы/задачи, без целей). */
+  members: string[];
+}
+
 export interface HypothesisMap {
   schemaVersion: 1;
   meta: MapMeta;
@@ -136,4 +147,6 @@ export interface HypothesisMap {
   hypotheses: Hypothesis[];
   tasks: Task[];
   blockers: Blocker[];
+  /** Группы элементов (топология «группировка элементов»). */
+  groups?: ElementGroup[];
 }
