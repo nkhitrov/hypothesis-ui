@@ -16,6 +16,7 @@ import {
   newId,
   saveCurrent,
   saveMap,
+  saveViewport,
 } from './model/storage';
 import {
   asProjectFile,
@@ -34,6 +35,7 @@ import { Sidebar } from './components/Sidebar';
 import { TextEditor } from './components/TextEditor';
 import { ImportDialog, type ImportPayload } from './components/ImportDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import type { Viewport } from '@xyflow/react';
 
 type View = 'board' | 'editor';
 
@@ -137,6 +139,11 @@ export default function App() {
       return;
     }
     showMap(id, true);
+  };
+
+  /** Область просмотра закрепляется за каждой картой своя. */
+  const rememberViewport = (mapId: string, viewport: Viewport): void => {
+    saveViewport(mapId, viewport);
   };
 
   const goBack = (): void => {
@@ -460,7 +467,14 @@ export default function App() {
               onOpenList={() => setSidebarOpen(true)}
             />
           ) : (
-            <MapView map={map} childGoals={childGoals} onOpenMap={openChildMap} />
+            <MapView
+              key={currentId}
+              map={map}
+              mapId={currentId}
+              childGoals={childGoals}
+              onOpenMap={openChildMap}
+              onViewportSave={rememberViewport}
+            />
           )
         ) : (
           <TextEditor

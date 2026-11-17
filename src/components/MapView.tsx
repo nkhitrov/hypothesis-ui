@@ -7,27 +7,36 @@ import {
   ReactFlow,
   type Edge,
   type Node,
+  type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { HypothesisMap } from '../types';
 import { ARROW_STYLE, computeLayout } from '../model/layout';
+import { loadViewport } from '../model/storage';
 import { CardView, type StickyNodeData } from './CardView';
 import { FlowEdge } from './FlowEdge';
 
 interface Props {
   map: HypothesisMap;
+  /** id карты в хранилище — ключ закрепления области просмотра. */
+  mapId: string;
   /** Тексты целей дочерних карт (childMapId → описание цели) — для плашек. */
   childGoals?: Record<string, string>;
   /** Переход в дочернюю карту: клик по плашке цели на задаче. */
   onOpenMap?: (id: string) => void;
+  /** Запомнить область просмотра карты (вызывается по окончании пан/зум). */
+  onViewportSave?: (mapId: string, viewport: Viewport) => void;
 }
 
 const nodeTypes = { sticky: CardView };
 const edgeTypes = { flow: FlowEdge };
 
 /** Доска на React Flow: карточки-узлы и строго горизонтальные стрелки
- *  (плавные кривые справа налево, вход в правую грань). Без анимаций. */
-export function MapView({ map, childGoals, onOpenMap }: Props) {
+ *  (плавные кривые справа налево, вход в правую грань). Без анимаций.
+ *  Область просмотра закреплена за картой: при открытии восстанавливается
+ *  сохранённая позиция/масштаб (иначе — вписывание по ширине). */
+export function MapView({ map, mapId, childGoals, onOpenMap, onViewportSave }: Props) {
+  const savedViewport = useMemo(() => loadViewport(mapId), [mapId]);
   const { nodes, edges } = useMemo(() => {
     const layout = computeLayout(map, { childGoals });
     const rfNodes: Node<StickyNodeData>[] = layout.cards.map((c) => ({
@@ -77,8 +86,10 @@ export function MapView({ map, childGoals, onOpenMap }: Props) {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
+        fitView={!savedViewport}
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
+        defaultViewport={savedViewport ?? undefined}
+        onMoveEnd={(_, viewport) => onViewportSave?.(mapId, viewport)}
         minZoom={0.05}
         maxZoom={2}
         nodesDraggable={false}

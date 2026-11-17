@@ -15,6 +15,7 @@ import { DEMO_MAPS } from './seed';
 const INDEX_KEY = 'hymap:index';
 const PROJECTS_KEY = 'hymap:projects';
 const CURRENT_KEY = 'hymap:current';
+const VIEWPORTS_KEY = 'hymap:viewports';
 const MAP_PREFIX = 'hymap:map:';
 
 export interface MapIndexEntry {
@@ -202,9 +203,58 @@ export function saveMap(id: string, map: HypothesisMap, projectId?: string): voi
 
 export function deleteMap(id: string): void {
   memoryMaps.delete(id);
+  memoryViewports.delete(id);
   if (!checkStorage()) return;
   window.localStorage.removeItem(MAP_PREFIX + id);
   writeIndex(loadIndex().filter((e) => e.id !== id));
+  // сохранённая область просмотра карты больше не нужна
+  try {
+    const all = JSON.parse(window.localStorage.getItem(VIEWPORTS_KEY) ?? '{}');
+    if (id in all) {
+      delete all[id];
+      window.localStorage.setItem(VIEWPORTS_KEY, JSON.stringify(all));
+    }
+  } catch {
+    // память
+  }
+}
+
+// ---------- Область просмотра карты (закрепляется за каждой картой своя) ----------
+
+/** Позиция/масштаб доски {x, y, zoom} — совместимо с Viewport React Flow. */
+export interface ViewportBox {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+const memoryViewports = new Map<string, ViewportBox>();
+
+export function loadViewport(mapId: string): ViewportBox | null {
+  if (!checkStorage()) return memoryViewports.get(mapId) ?? null;
+  try {
+    const all = JSON.parse(window.localStorage.getItem(VIEWPORTS_KEY) ?? '{}');
+    const vp = all?.[mapId];
+    return typeof vp?.x === 'number' && typeof vp?.y === 'number' && typeof vp?.zoom === 'number'
+      ? (vp as ViewportBox)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveViewport(mapId: string, vp: ViewportBox): void {
+  if (!checkStorage()) {
+    memoryViewports.set(mapId, vp);
+    return;
+  }
+  try {
+    const all = JSON.parse(window.localStorage.getItem(VIEWPORTS_KEY) ?? '{}');
+    all[mapId] = vp;
+    window.localStorage.setItem(VIEWPORTS_KEY, JSON.stringify(all));
+  } catch {
+    memoryViewports.set(mapId, vp);
+  }
 }
 
 // ---------- Текущий выбор (переживает перезагрузку) ----------
