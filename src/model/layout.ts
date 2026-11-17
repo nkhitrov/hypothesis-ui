@@ -52,6 +52,8 @@ export interface CardNode {
   /** Переопределение цвета (негативный субъект). */
   fill?: string;
   extraStyle?: string;
+  /** Дочерняя карта (task.childMapId): клик по карточке открывает её. */
+  linkTo?: string;
 }
 export interface EdgeNode {
   from: string;
@@ -151,6 +153,7 @@ class Card {
   cost: number | null = null;
   fill?: string;
   extraStyle?: string;
+  linkTo?: string;
   incomingRight = 0;
 
   constructor(
@@ -204,19 +207,28 @@ export function computeLayout(map: HypothesisMap): Layout {
   const cards = new Map<string, Card>();
 
   // --- Цели: метрики внутри карточки (классическая топология) ---
+  // Секции «Метрики»/«Балансирующие метрики» видны всегда: если уровень
+  // не заполнен ни в карточке, ни вынесенными карточками — «Нужно заполнить».
   const goalCard = (g: typeof map.goal): Card => {
     const c = new Card(g.id, 'goal');
     c.add('', 'Цель', { boldText: true });
     c.add('', g.description);
+    const extracted = (map.metrics ?? []).filter((m) => m.goalRef === g.id);
     const main = g.metrics.filter((m) => !m.balancing);
     if (main.length > 0) {
       c.add('', 'Метрики', { boldText: true });
       for (const m of main) c.add('', `${m.description}: ${m.current} → ${m.target}`);
+    } else if (!extracted.some((m) => !m.balancing)) {
+      c.add('', 'Метрики', { boldText: true });
+      c.add('', 'Нужно заполнить', { cls: 'muted' });
     }
     const balancing = g.metrics.filter((m) => m.balancing);
     if (balancing.length > 0) {
       c.add('', 'Балансирующие метрики', { boldText: true });
       for (const m of balancing) c.add('', `${m.description}: ${m.current} → ${m.target}`);
+    } else if (!extracted.some((m) => m.balancing)) {
+      c.add('', 'Балансирующие метрики', { boldText: true });
+      c.add('', 'Нужно заполнить', { cls: 'muted' });
     }
     return c;
   };
@@ -234,18 +246,25 @@ export function computeLayout(map: HypothesisMap): Layout {
     cards.set(m.id, c);
   }
 
-  // --- Субъекты ---
+  // --- Субъекты (секции «Боли»/«Желания» всегда видны, как у целей) ---
   for (const s of map.subjects) {
     const c = new Card(s.id, 'subject');
     c.priority = LEVEL_TO_PRIORITY[s.influence] ?? null;
     c.add('', s.description, { boldText: true });
+    const mos = (map.motivations ?? []).filter((mo) => mo.subject === s.id);
     if ((s.pains ?? []).length > 0) {
       c.add('', 'Боли', { boldText: true });
       for (const p of s.pains ?? []) c.add('', p);
+    } else if (!mos.some((mo) => mo.kind === 'pain')) {
+      c.add('', 'Боли', { boldText: true });
+      c.add('', 'Нужно заполнить', { cls: 'muted' });
     }
     if ((s.wishes ?? []).length > 0) {
       c.add('', 'Желания', { boldText: true });
       for (const wish of s.wishes ?? []) c.add('', wish);
+    } else if (!mos.some((mo) => mo.kind === 'wish')) {
+      c.add('', 'Желания', { boldText: true });
+      c.add('', 'Нужно заполнить', { cls: 'muted' });
     }
     if (s.negative) c.fill = NEGATIVE_SUBJECT_FILL;
     cards.set(s.id, c);
@@ -284,7 +303,10 @@ export function computeLayout(map: HypothesisMap): Layout {
   for (const t of map.tasks) {
     const c = new Card(t.id, 'task');
     c.add('', t.description, { boldText: true });
-    if (t.childMapId) c.add('', '↳ раскрыта в карту уровнем ниже', { cls: 'muted' });
+    if (t.childMapId) {
+      c.linkTo = t.childMapId;
+      c.add('', '↳ раскрыта в карту уровнем ниже →', { cls: 'muted link' });
+    }
     if (t.owner || t.due) {
       c.add('', `${t.owner ?? '—'}${t.due ? ` · до ${t.due}` : ''}`, { cls: 'muted' });
     }
@@ -641,6 +663,7 @@ export function computeLayout(map: HypothesisMap): Layout {
       incomingRight: card.incomingRight,
       fill: card.fill,
       extraStyle: card.extraStyle,
+      linkTo: card.linkTo,
     };
   });
 
