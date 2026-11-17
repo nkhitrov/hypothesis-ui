@@ -36,8 +36,11 @@ export function MapView({ map, childGoals, onOpenMap }: Props) {
       position: { x: c.x, y: c.y },
       data: { card: c, openMap: onOpenMap },
       // размеры узла = размеры карточки из раскладки: обёртка RF обязана
-      // совпадать с видимой карточкой, иначе хэндлы и рёбра разъедутся
-      style: { width: c.w, height: c.h },
+      // совпадать с видимой карточкой, иначе хэндлы и рёбра разъедутся.
+      // pointerEvents: RF v12 ставит узлам pointer-events:none, когда они
+      // не selectable/draggable — кликабельным карточкам включаем явно,
+      // иначе реальные клики попадают в панель под узлами
+      style: { width: c.w, height: c.h, ...(c.linkTo ? { pointerEvents: 'all' } : null) },
       draggable: false,
       selectable: false,
     }));
